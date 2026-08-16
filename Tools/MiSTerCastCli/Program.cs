@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -97,6 +98,12 @@ namespace MiSTerCast
 
         private sealed class TestPatternForm : Form
         {
+            [DllImport("winmm.dll")]
+            private static extern uint timeBeginPeriod(uint period);
+
+            [DllImport("winmm.dll")]
+            private static extern uint timeEndPeriod(uint period);
+
             private readonly System.Windows.Forms.Timer timer;
             private readonly Stopwatch stopwatch = Stopwatch.StartNew();
             private readonly Font counterFont = new Font(FontFamily.GenericMonospace, 72, FontStyle.Bold, GraphicsUnit.Pixel);
@@ -105,6 +112,7 @@ namespace MiSTerCast
                 Alignment = StringAlignment.Center,
                 LineAlignment = StringAlignment.Center,
             };
+            private readonly bool highResolutionTimer;
             private long frame;
 
             public TestPatternForm(Screen screen)
@@ -116,10 +124,11 @@ namespace MiSTerCast
                 ShowInTaskbar = false;
                 TopMost = true;
                 DoubleBuffered = true;
+                highResolutionTimer = timeBeginPeriod(1) == 0;
                 timer = new System.Windows.Forms.Timer { Interval = 16 };
                 timer.Tick += (sender, args) =>
                 {
-                    frame++;
+                    frame = (long)(stopwatch.Elapsed.TotalSeconds * 60.0);
                     Invalidate();
                 };
                 Shown += (sender, args) => timer.Start();
@@ -149,6 +158,8 @@ namespace MiSTerCast
                 if (disposing)
                 {
                     timer.Dispose();
+                    if (highResolutionTimer)
+                        timeEndPeriod(1);
                     counterFont.Dispose();
                     centered.Dispose();
                 }
