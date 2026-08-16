@@ -22,6 +22,7 @@ namespace MiSTerCast
         {
             public string Target;
             public string ModelineName = "320x240 NTSC (60Hz)";
+            public string SwitchModelineName;
             public string ModelinesPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "modelines.dat");
             public int DurationSeconds = 10;
             public int Display = 1;
@@ -222,6 +223,14 @@ namespace MiSTerCast
                 candidate => String.Equals(candidate.Name, options.ModelineName, StringComparison.OrdinalIgnoreCase));
             if (selected == null)
                 throw new ArgumentException("Unknown modeline: " + options.ModelineName);
+            Modeline switched = null;
+            if (!String.IsNullOrWhiteSpace(options.SwitchModelineName))
+            {
+                switched = modelines.FirstOrDefault(
+                    candidate => String.Equals(candidate.Name, options.SwitchModelineName, StringComparison.OrdinalIgnoreCase));
+                if (switched == null)
+                    throw new ArgumentException("Unknown switch modeline: " + options.SwitchModelineName);
+            }
 
             ushort captureWidth = options.CaptureWidth ?? selected.HActive;
             ushort captureHeight = options.CaptureHeight ?? selected.VActive;
@@ -247,9 +256,10 @@ namespace MiSTerCast
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" duration={2}s display={3} audio={4} capture={5}x{6} test_pattern={7}",
+                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s display={4} audio={5} capture={6}x{7} test_pattern={8}",
                     address,
                     selected.Name,
+                    switched == null ? "" : switched.Name,
                     options.DurationSeconds,
                     options.Display,
                     options.Audio,
@@ -307,9 +317,30 @@ namespace MiSTerCast
                     return 5;
                 }
 
-                DateTime end = DateTime.UtcNow.AddSeconds(options.DurationSeconds);
+                DateTime started = DateTime.UtcNow;
+                DateTime switchAt = started.AddSeconds(options.DurationSeconds / 2.0);
+                DateTime end = started.AddSeconds(options.DurationSeconds);
+                bool modeSwitched = false;
                 while (!Cancellation.IsCancellationRequested && DateTime.UtcNow < end)
+                {
+                    if (!modeSwitched && switched != null && DateTime.UtcNow >= switchAt)
+                    {
+                        QueueLog("Switching live stream to modeline \"" + switched.Name + "\".", false);
+                        MiSTerCastInterop.SetModeline(
+                            switched.PixelClock,
+                            switched.HActive,
+                            switched.HBegin,
+                            switched.HEnd,
+                            switched.HTotal,
+                            switched.VActive,
+                            switched.VBegin,
+                            switched.VEnd,
+                            switched.VTotal,
+                            switched.Interlace);
+                        modeSwitched = true;
+                    }
                     Thread.Sleep(50);
+                }
 
                 return 0;
             }
@@ -403,6 +434,9 @@ namespace MiSTerCast
                     break;
                 case "--modeline":
                     options.ModelineName = NextValue(args, ref index, argument);
+                    break;
+                case "--switch-modeline":
+                    options.SwitchModelineName = NextValue(args, ref index, argument);
                     break;
                 case "--modelines":
                     options.ModelinesPath = NextValue(args, ref index, argument);
@@ -513,6 +547,7 @@ namespace MiSTerCast
             Console.WriteLine("MiSTerCastCli --target <IPv4> [options]");
             Console.WriteLine();
             Console.WriteLine("  --modeline <name>       Preset name from modelines.dat");
+            Console.WriteLine("  --switch-modeline <name> Switch to another preset halfway through the run");
             Console.WriteLine("  --duration <seconds>    Streaming time (default: 10)");
             Console.WriteLine("  --display <1-4>         Windows display number (default: 1)");
             Console.WriteLine("  --capture-width <px>    Capture width (default: modeline active width)");

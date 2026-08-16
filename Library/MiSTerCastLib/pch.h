@@ -41,6 +41,7 @@
 
 #include <string>
 #include <functional>
+#include <mutex>
 #include <vector>
 
 #include <d3d11.h>

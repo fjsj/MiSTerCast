@@ -84,16 +84,19 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
     source_config.syncrefresh = true;
     source_config.framedelay = 0;
 
-    selected_modeline.pclock = 6.700;
-    selected_modeline.hactive = 320;
-    selected_modeline.hbegin = 336;
-    selected_modeline.hend = 367;
-    selected_modeline.htotal = 426;
-    selected_modeline.vactive = 240;
-    selected_modeline.vbegin = 244;
-    selected_modeline.vend = 247;
-    selected_modeline.vtotal = 262;
-    selected_modeline.interlace = 0;
+    {
+        std::lock_guard<std::mutex> lock(selected_modeline_mutex);
+        selected_modeline.pclock = 6.700;
+        selected_modeline.hactive = 320;
+        selected_modeline.hbegin = 336;
+        selected_modeline.hend = 367;
+        selected_modeline.htotal = 426;
+        selected_modeline.vactive = 240;
+        selected_modeline.vbegin = 244;
+        selected_modeline.vend = 247;
+        selected_modeline.vtotal = 262;
+        selected_modeline.interlace = 0;
+    }
     
 
     if (!InitializeVideoCapture(0, fnCapture))
@@ -165,18 +168,21 @@ MISTERCASTLIB_API bool SetModeline(
     bool interlace)
 {
     LogMessage("SetModeline called");
-    selected_modeline.pclock = pclock;
-    selected_modeline.hactive = hactive;
-    selected_modeline.hbegin = hbegin;
-    selected_modeline.hend = hend;
-    selected_modeline.htotal = htotal;
-    selected_modeline.vactive = vactive;
-    selected_modeline.vbegin = vbegin;
-    selected_modeline.vend = vend;
-    selected_modeline.vtotal = vtotal;
-    selected_modeline.interlace = interlace;
+    {
+        std::lock_guard<std::mutex> lock(selected_modeline_mutex);
+        selected_modeline.pclock = pclock;
+        selected_modeline.hactive = hactive;
+        selected_modeline.hbegin = hbegin;
+        selected_modeline.hend = hend;
+        selected_modeline.htotal = htotal;
+        selected_modeline.vactive = vactive;
+        selected_modeline.vbegin = vbegin;
+        selected_modeline.vend = vend;
+        selected_modeline.vtotal = vtotal;
+        selected_modeline.interlace = interlace;
+    }
 
-    shouldUpdateVideoMode = true;
+    shouldUpdateVideoMode.store(true, std::memory_order_release);
 
     return true;
 }
@@ -193,6 +199,7 @@ MISTERCASTLIB_API bool SetSource(
     INT16 yoffset,
     UINT8 rotation)
 {
+    const nogpu_modeline modeline = selected_modeline_snapshot();
     source_config.display = display;
     source_config.audio = audio;
     source_config.preview = preview;
@@ -207,24 +214,24 @@ MISTERCASTLIB_API bool SetSource(
     switch (cropmode)
     {
     case CropMode::X1:
-        source_config.width = selected_modeline.hactive;
-        source_config.height = selected_modeline.vactive;
+        source_config.width = modeline.hactive;
+        source_config.height = modeline.vactive;
         break;
     case CropMode::X2:
-        source_config.width = selected_modeline.hactive * 2;
-        source_config.height = selected_modeline.vactive * 2;
+        source_config.width = modeline.hactive * 2;
+        source_config.height = modeline.vactive * 2;
         break;
     case CropMode::X3:
-        source_config.width = selected_modeline.hactive * 3;
-        source_config.height = selected_modeline.vactive * 3;
+        source_config.width = modeline.hactive * 3;
+        source_config.height = modeline.vactive * 3;
         break;
     case CropMode::X4:
-        source_config.width = selected_modeline.hactive * 4;
-        source_config.height = selected_modeline.vactive * 4;
+        source_config.width = modeline.hactive * 4;
+        source_config.height = modeline.vactive * 4;
         break;
     case CropMode::X5:
-        source_config.width = selected_modeline.hactive * 5;
-        source_config.height = selected_modeline.vactive * 5;
+        source_config.width = modeline.hactive * 5;
+        source_config.height = modeline.vactive * 5;
         break;
     default:
         break;

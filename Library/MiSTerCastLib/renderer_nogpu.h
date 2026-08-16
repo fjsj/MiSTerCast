@@ -53,6 +53,13 @@ typedef struct nogpu_modeline
 
 std::atomic_bool shouldUpdateVideoMode = false;
 nogpu_modeline selected_modeline = {};
+std::mutex selected_modeline_mutex;
+
+nogpu_modeline selected_modeline_snapshot()
+{
+    std::lock_guard<std::mutex> lock(selected_modeline_mutex);
+    return selected_modeline;
+}
 
 #pragma pack()
 
@@ -163,10 +170,6 @@ renderer_nogpu::~renderer_nogpu()
 //============================================================
 void renderer_nogpu::draw()
 {
-    // Hack because these aren't intiailized...
-    m_width = selected_modeline.hactive;
-    m_height = selected_modeline.interlace ? selected_modeline.vactive / 2 : selected_modeline.vactive;
-
     // resize window if required
     static int old_width = 0;
     static int old_height = 0;
@@ -183,6 +186,7 @@ void renderer_nogpu::draw()
         if (m_initialized)
         {
             LogMessage("Done.");
+            shouldUpdateVideoMode.store(false, std::memory_order_release);
             nogpu_switch_video_mode();
         }
         else
@@ -194,6 +198,12 @@ void renderer_nogpu::draw()
     // only send frame if nogpu is initialized
     if (!m_initialized)
         return;
+
+    // Apply the receiver mode before selecting a field and transforming the
+    // next payload. Applying it later mixed the new active size with the old
+    // height/interlace layout for one frame during a live switch.
+    if (shouldUpdateVideoMode.exchange(false, std::memory_order_acq_rel))
+        nogpu_switch_video_mode();
 
     const groovyMisterDiagnostics transportState = groovyMister.getDiagnostics();
     if (!transportState.connected)
@@ -242,10 +252,6 @@ void renderer_nogpu::draw()
         LogMessage("Unable to transform the captured frame.", true);
         return;
     }
-
-    // change video mode right before the blit
-    if (shouldUpdateVideoMode)
-        nogpu_switch_video_mode();
 
     bool valid_status = true;
 
@@ -370,41 +376,38 @@ bool renderer_nogpu::nogpu_init()
 
 bool renderer_nogpu::nogpu_switch_video_mode()
 {
-    nogpu_modeline *mode = &selected_modeline;
-    if (mode == nullptr)
-        return false;
+    const nogpu_modeline mode = selected_modeline_snapshot();
 
-    m_current_mode = *mode;
+    m_current_mode = mode;
 
     // Send new modeline to nogpu
     LogMessage("Sending CMD_SWITCHRES...");
 
-    m_width = mode->hactive;
-    m_height = mode->vactive;
-    m_vtotal = mode->vtotal;
+    m_width = mode.hactive;
+    m_height = mode.vactive;
+    m_vtotal = mode.vtotal;
     m_field = 0;
 
-    const double linePeriod = mistercast::LinePeriodMilliseconds(mode->pclock, mode->htotal);
+    const double linePeriod = mistercast::LinePeriodMilliseconds(mode.pclock, mode.htotal);
     const double fieldPeriod = mistercast::FieldPeriodMilliseconds(
-        mode->pclock, mode->htotal, mode->vtotal, mode->interlace);
+        mode.pclock, mode.htotal, mode.vtotal, mode.interlace);
     if (linePeriod > 0.0 && fieldPeriod > 0.0)
     {
         m_line_period = linePeriod;
         m_period = fieldPeriod;
     }
 
-    shouldUpdateVideoMode = false;
     groovyMister.CmdSwitchres(
-        mode->pclock,
-        mode->hactive,
-        mode->hbegin,
-        mode->hend,
-        mode->htotal,
-        mode->vactive,
-        mode->vbegin,
-        mode->vend,
-        mode->vtotal,
-        mode->interlace
+        mode.pclock,
+        mode.hactive,
+        mode.hbegin,
+        mode.hend,
+        mode.htotal,
+        mode.vactive,
+        mode.vbegin,
+        mode.vend,
+        mode.vtotal,
+        mode.interlace
     );
 
     return true;
