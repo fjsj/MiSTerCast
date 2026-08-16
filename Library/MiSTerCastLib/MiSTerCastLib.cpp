@@ -36,12 +36,14 @@ void capture_screen()
 std::atomic_bool casting_screen = false;
 void cast_screen()
 {
+    const SourceOptions streamSource = source_config.snapshot();
+
     if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST))
     {
         LogMessage("Setting cast screen thread priority failed: " + std::to_string(GetLastError()), true);
     }
 
-    if (source_config.audio)
+    if (streamSource.audio)
     {
         LogMessage("Audio capture starting.");
         StartAudioCapture();
@@ -50,7 +52,7 @@ void cast_screen()
     LogMessage("Casting to MiSTer starting.");
     casting_screen = true;
     {
-        auto renderer = std::make_unique<renderer_nogpu>(targetIpString);
+        auto renderer = std::make_unique<renderer_nogpu>(targetIpString, streamSource.audio);
         {
             do
             {
@@ -61,7 +63,7 @@ void cast_screen()
     casting_screen = false;
     LogMessage("Casting to MiSTer stopped.");
 
-    if (source_config.audio)
+    if (streamSource.audio)
     {
         StopAudioCapture();
         LogMessage("Audio capture stopped.");
@@ -81,8 +83,12 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
     logFunction = fnLog;
     LogMessage("Initializing MiSTerCast");
 
-    source_config.syncrefresh = true;
-    source_config.framedelay = 0;
+    SourceOptions initialSource = source_config.snapshot();
+    initialSource.syncrefresh = true;
+    initialSource.framedelay = 0;
+    initialSource.alignment = Alignment::Center;
+    initialSource.cropmode = CropMode::Full43;
+    source_config.publish(initialSource);
 
     {
         std::lock_guard<std::mutex> lock(selected_modeline_mutex);
@@ -200,44 +206,46 @@ MISTERCASTLIB_API bool SetSource(
     UINT8 rotation)
 {
     const nogpu_modeline modeline = selected_modeline_snapshot();
-    source_config.display = display;
-    source_config.audio = audio;
-    source_config.preview = preview;
-    source_config.alignment = (Alignment)alignment;
-    source_config.cropmode = (CropMode)cropmode;
-    source_config.width = xcrop;
-    source_config.height = ycrop;
-    source_config.xoffset = xoffset;
-    source_config.yoffset = yoffset;
-    source_config.rotation = static_cast<Rotation>(rotation);
+    const SourceOptions previousSource = source_config.snapshot();
+    SourceOptions source = previousSource;
+    source.display = display;
+    source.audio = audio;
+    source.preview = preview;
+    source.alignment = (Alignment)alignment;
+    source.cropmode = (CropMode)cropmode;
+    source.width = xcrop;
+    source.height = ycrop;
+    source.xoffset = xoffset;
+    source.yoffset = yoffset;
+    source.rotation = static_cast<Rotation>(rotation);
 
     switch (cropmode)
     {
     case CropMode::X1:
-        source_config.width = modeline.hactive;
-        source_config.height = modeline.vactive;
+        source.width = modeline.hactive;
+        source.height = modeline.vactive;
         break;
     case CropMode::X2:
-        source_config.width = modeline.hactive * 2;
-        source_config.height = modeline.vactive * 2;
+        source.width = modeline.hactive * 2;
+        source.height = modeline.vactive * 2;
         break;
     case CropMode::X3:
-        source_config.width = modeline.hactive * 3;
-        source_config.height = modeline.vactive * 3;
+        source.width = modeline.hactive * 3;
+        source.height = modeline.vactive * 3;
         break;
     case CropMode::X4:
-        source_config.width = modeline.hactive * 4;
-        source_config.height = modeline.vactive * 4;
+        source.width = modeline.hactive * 4;
+        source.height = modeline.vactive * 4;
         break;
     case CropMode::X5:
-        source_config.width = modeline.hactive * 5;
-        source_config.height = modeline.vactive * 5;
+        source.width = modeline.hactive * 5;
+        source.height = modeline.vactive * 5;
         break;
     default:
         break;
     }
 
-    if (displayIndex != source_config.display)
+    if (displayIndex != source.display)
     {
         stopCapture = true;
         do {} while (capturing_screen); // wait for threads
@@ -245,11 +253,24 @@ MISTERCASTLIB_API bool SetSource(
 
         captureScreenTask->detach();
         CleanupVideoCapture();
-        InitializeVideoCapture(source_config.display, captureFunction);
+        source_config.publish(source);
+        if (!InitializeVideoCapture(source.display, captureFunction))
+        {
+            LogMessage("Failed to initialize the selected video capture source.", true);
+            CleanupVideoCapture();
+            source_config.publish(previousSource);
+            if (InitializeVideoCapture(previousSource.display, captureFunction))
+                captureScreenTask = std::make_unique<std::thread>(capture_screen);
+            else
+                LogMessage("Failed to restore the previous video capture source.", true);
+            return false;
+        }
         captureScreenTask = std::make_unique<std::thread>(capture_screen);
     }
-
-    SetSourceOptions(&source_config);
+    else
+    {
+        source_config.publish(source);
+    }
 
     return true;
 }

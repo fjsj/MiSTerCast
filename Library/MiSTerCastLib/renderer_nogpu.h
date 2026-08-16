@@ -67,8 +67,9 @@ nogpu_modeline selected_modeline_snapshot()
 class renderer_nogpu
 {
 public:
-    renderer_nogpu(std::string targetip)
-        : m_targetip(targetip)
+    renderer_nogpu(std::string targetip, bool audioEnabled)
+        : m_targetip(targetip),
+          m_audio_enabled(audioEnabled)
     {
     }
 
@@ -119,6 +120,7 @@ private:
     uint8_t m_diagnostics_last_f1 = 0;
     bool m_diagnostics_have_sample = false;
     bool m_transport_failure_logged = false;
+    bool m_audio_enabled = false;
 
     uint64_t time_start = 0;
     uint64_t time_entry = 0;
@@ -170,6 +172,8 @@ renderer_nogpu::~renderer_nogpu()
 //============================================================
 void renderer_nogpu::draw()
 {
+    const SourceOptions source = source_config.snapshot();
+
     // resize window if required
     static int old_width = 0;
     static int old_height = 0;
@@ -245,7 +249,7 @@ void renderer_nogpu::draw()
         m_current_mode.vactive,
         m_current_mode.interlace,
         static_cast<uint8_t>(m_field),
-        source_config.rotation,
+        videoCaptures[drawIndex].rotation,
         reinterpret_cast<uint8_t*>(fb),
         outputSize))
     {
@@ -257,7 +261,7 @@ void renderer_nogpu::draw()
 
     time_entry = CurrentTicks();
 
-    if (source_config.syncrefresh && m_first_blit)
+    if (source.syncrefresh && m_first_blit)
     {
         time_start = time_entry;
         time_blit = time_entry;
@@ -272,18 +276,18 @@ void renderer_nogpu::draw()
 
     int vsync_offset = 0;
 
-    if (source_config.framedelay == 0)
+    if (source.framedelay == 0)
         // automatic
         m_frame_delay = std::max((double)(m_period - std::max(m_fd_margin, get_ms(time_frame_dm))) / m_period, 0.0);
     else
     {
         // user defined
-        m_frame_delay = (double)(source_config.framedelay) / 10.0;
+        m_frame_delay = (double)(source.framedelay) / 10.0;
         vsync_offset = 0;// window().machine().video().vsync_offset();
     }
 
     // Capture and send audio
-    if (source_config.audio)
+    if (m_audio_enabled)
     {
         const bool audioBufferAvailable = groovyMister.CanWriteAudioBuffer();
         TickAudioCapture(audioBufferAvailable);
@@ -296,7 +300,7 @@ void renderer_nogpu::draw()
         m_current_mode.vtotal,
         m_frame_delay + (m_current_mode.vtotal == 0 ? 0.0 : (double)vsync_offset / m_current_mode.vtotal),
         m_current_mode.interlace,
-        source_config.framedelay == 0);
+        source.framedelay == 0);
 
     // Blit now
     const uint64_t diagnostics_send_start = CurrentTicks();
@@ -325,7 +329,7 @@ bool renderer_nogpu::nogpu_init()
 {
     m_compression = 0x01; // lz4 compression
 
-    const uint32_t negotiatedAudioRate = source_config.audio ? audioSampleRate.load() : 0;
+    const uint32_t negotiatedAudioRate = m_audio_enabled ? audioSampleRate.load() : 0;
     switch (negotiatedAudioRate)
     {
     case 0:
@@ -355,7 +359,7 @@ bool renderer_nogpu::nogpu_init()
         UDP_PORT,
         m_compression,
         negotiatedAudioRate,
-        source_config.audio ? 2 : 0,
+        m_audio_enabled ? 2 : 0,
         0,
         1500);
     if (ret == 0)

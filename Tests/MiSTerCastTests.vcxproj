@@ -84,6 +84,7 @@
     <ClCompile Include="frame_transform_tests.cpp" />
     <ClCompile Include="groovy_protocol_tests.cpp" />
     <ClCompile Include="streaming_timing_tests.cpp" />
+    <ClCompile Include="source_options_state_tests.cpp" />
     <ClCompile Include="transport_lifecycle_tests.cpp" />
     <ClCompile Include="..\Library\MiSTerCastLib\groovymister.cpp" />
   </ItemGroup>

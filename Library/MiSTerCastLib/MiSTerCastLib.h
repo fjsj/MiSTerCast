@@ -1,3 +1,5 @@
+#pragma once
+
 #include "FrameTransform.h"
 
 #ifdef MISTERCASTLIB_EXPORTS

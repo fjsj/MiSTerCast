@@ -1,15 +1,18 @@
 #pragma once
 
+#include "SourceOptionsState.h"
+
 #define BUFFER_COUNT 3
 
 
 struct Bitmap {
     int                  width = 0;
     int                  height = 0;
+    Rotation             rotation = Rotation::None;
     std::vector<uint8_t> buffer;
 };
 
-SourceOptions source_config = {};
+SourceOptionsState source_config;
 std::atomic_uint lastVideoCaptureIndex = 0;
 std::atomic<uint64_t> videoCaptureSequence = 0;
 Bitmap* videoCaptures = nullptr;
@@ -19,21 +22,10 @@ ID3D11DeviceContext*    d3dDeviceContext = nullptr;
 IDXGIOutputDuplication* desktopDuplication = nullptr;
 bool                    haveFrameLock = false;
 capture_image_function  captureFunction;
-std::atomic_bool        hasNewSourceOptions;
-SourceOptions           currentSourceOptions;
-SourceOptions           newSourceOptions;
-
 bool InitializeVideoCapture(int outputNumber, capture_image_function fnCapture)
 {
     displayIndex = outputNumber;
     captureFunction = fnCapture;
-    currentSourceOptions = {};
-    currentSourceOptions.display = 0;
-    currentSourceOptions.framedelay = 0;
-    currentSourceOptions.alignment = Alignment::Center;
-    currentSourceOptions.audio = 1;
-    currentSourceOptions.syncrefresh = true;
-    currentSourceOptions.cropmode = CropMode::Full43;
 
     if (videoCaptures == nullptr)
     {
@@ -130,11 +122,7 @@ bool TickVideoCapture()
 
     HRESULT hr;
 
-    if (hasNewSourceOptions)
-    {
-        currentSourceOptions = newSourceOptions;
-        hasNewSourceOptions = false;
-    }
+    const SourceOptions currentSourceOptions = source_config.snapshot();
 
     // Release right before acquiring next frame
     if (haveFrameLock) {
@@ -168,7 +156,7 @@ bool TickVideoCapture()
 
     unsigned int width;
     unsigned int height;
-    switch (source_config.rotation)
+    switch (currentSourceOptions.rotation)
     {
     case Rotation::CW90:
     case Rotation::CCW90:
@@ -198,7 +186,7 @@ bool TickVideoCapture()
     case CropMode::X5:
         break;
     case CropMode::Full43:
-        switch (source_config.rotation)
+        switch (currentSourceOptions.rotation)
         {
         case Rotation::CW90:
         case Rotation::CCW90:
@@ -211,7 +199,7 @@ bool TickVideoCapture()
         height = desc.Height;
         break;
     case CropMode::Full54:
-        switch (source_config.rotation)
+        switch (currentSourceOptions.rotation)
         {
         case Rotation::CW90:
         case Rotation::CCW90:
@@ -315,6 +303,7 @@ bool TickVideoCapture()
         videoCaptures[nextIndex].height = height;
         videoCaptures[nextIndex].buffer.resize(width * height * 4);
     }
+    videoCaptures[nextIndex].rotation = currentSourceOptions.rotation;
 
     for (int y = 0; y < (int)height; y++) // TODO: Can this be improved?
         memcpy(videoCaptures[nextIndex].buffer.data() + y * width * 4, (uint8_t*)sr.pData + sr.RowPitch * y, width * 4);
@@ -330,10 +319,4 @@ bool TickVideoCapture()
     gpuTex->Release();
 
     return ok;
-}
-
-void SetSourceOptions(const SourceOptions* sourceOptions)
-{
-    newSourceOptions = *sourceOptions;
-    hasNewSourceOptions = true;
 }
