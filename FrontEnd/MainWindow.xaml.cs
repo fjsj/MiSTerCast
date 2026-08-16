@@ -12,7 +12,9 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using System.Globalization;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace MiSTerCast
 {
@@ -155,7 +157,7 @@ namespace MiSTerCast
             }
         }
 
-        private void ToggleStreamButton_Click(object sender, RoutedEventArgs e)
+        private async void ToggleStreamButton_Click(object sender, RoutedEventArgs e)
         {
             if (isStreaming)
             {
@@ -177,17 +179,50 @@ namespace MiSTerCast
                 {
                     EnablePreviewCheckBox.IsChecked = false;
                     IPAddress ipAddress = null;
-                    if (!IPAddress.TryParse(TargetIpAddresTextBox.Text, out ipAddress))
+                    string target = TargetIpAddresTextBox.Text.Trim();
+                    if (!IPAddress.TryParse(target, out ipAddress))
                     {
+                        if (target.Length == 0 || target.All(character => Char.IsDigit(character) || character == '.'))
+                        {
+                            Log("Invalid IPv4 address: " + target, true);
+                            return;
+                        }
+
+                        ToggleStreamButton.IsEnabled = false;
+                        ToggleStreamButton.Content = "Resolving...";
                         try
                         {
-                            ipAddress = Dns.GetHostEntry(TargetIpAddresTextBox.Text).AddressList[0];
+                            Task<IPAddress[]> resolveTask = Dns.GetHostAddressesAsync(target);
+                            if (await Task.WhenAny(resolveTask, Task.Delay(TimeSpan.FromSeconds(5))) != resolveTask)
+                            {
+                                Log("Resolving target host timed out after five seconds: " + target, true);
+                                return;
+                            }
+
+                            ipAddress = (await resolveTask).FirstOrDefault(
+                                address => address.AddressFamily == AddressFamily.InterNetwork);
+                            if (ipAddress == null)
+                            {
+                                Log("Target host has no IPv4 address: " + target, true);
+                                return;
+                            }
+                            Log("Resolved target " + target + " to " + ipAddress + ".");
                         }
                         catch (Exception exception)
                         {
                             Log("Resolving target IP address failed: " + exception.Message, true);
                             return;
                         }
+                        finally
+                        {
+                            ToggleStreamButton.IsEnabled = true;
+                            ToggleStreamButton.Content = "Start Stream";
+                        }
+                    }
+                    else if (ipAddress.AddressFamily != AddressFamily.InterNetwork)
+                    {
+                        Log("Only IPv4 target addresses are supported.", true);
+                        return;
                     }
 
                     if (MiSTerCastInterop.StartStream(ipAddress.ToString()))

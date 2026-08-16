@@ -3,7 +3,7 @@ A general-purpose tool for streaming your Windows PC screen to your MiSTer throu
 
 This is not a replacement for Groovy_Mame or other integrated emulators.	
 
-Make sure you already have Groovy_Mame working well with Groovy_MiSTer before using MiSTerCast. A direct ethernet connection to your MiSTer is recommended.
+Make sure you already have Groovy_Mame working well with Groovy_MiSTer before using MiSTerCast. A direct Ethernet connection to your MiSTer is recommended. Enter that adapter's raw IPv4 address in MiSTerCast when the MiSTer is also reachable over Wi-Fi; a host name such as `MiSTer` can resolve to the slower interface. Host-name lookup remains supported, runs without blocking the GUI, and logs the selected IPv4 address.
 https://github.com/lutechsource/MiSTerStuff/blob/main/GroovyMiSTer/mame_documentation.md
 https://github.com/psakhis/Groovy_MiSTer
 
