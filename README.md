@@ -15,6 +15,8 @@ The Windows sender intentionally forwards the newest audio accumulated during ea
 
 Frame-delay requests are sent to the MiSTer core and raster pacing is calculated from the active modeline. Automatic interlaced output limits the requested sync line to the first half of the raster so an alternating field upload cannot race the field being displayed. Manual frame-delay values remain explicit and are not capped this way.
 
+MiSTer status packets are decoded explicitly as little-endian protocol data. Status ordering follows the wrapping 32-bit frame counter, so a long-running stream continues to accept acknowledgements when the counter rolls over.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:

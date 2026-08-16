@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "groovymister.h"
+#include "GroovyProtocol.h"
 #include "StreamingTiming.h"
 
 #include <stdint.h>
@@ -111,6 +112,7 @@ GroovyMister::GroovyMister()
 	m_delta_enabled[0] = 0;
 	m_delta_enabled[1] = 0;
 	m_isConnected = 0;
+	m_haveFpgaStatus = false;
 
 	memset(&m_tickStart, 0, sizeof(m_tickStart));
 	memset(&m_tickEnd, 0, sizeof(m_tickEnd));
@@ -448,6 +450,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 	m_lz4Frames = lz4Frames;
 	m_soundChan = soundChan;
 	m_rgbMode = rgbMode;
+	m_haveFpgaStatus = false;
 
 	m_bufferSend[0] = CMD_INIT;
 	m_bufferSend[1] = (lz4Frames) ? 1 : 0; //0-RAW or 1-LZ4 ;
@@ -616,10 +619,8 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 		}
 	}
 
-	m_bufferSend[0] = CMD_BLIT_FIELD_VSYNC;
-	memcpy(&m_bufferSend[1], &frame, sizeof(frame));
-	memcpy(&m_bufferSend[5], &field, sizeof(field));
-	memcpy(&m_bufferSend[6], &vSync, sizeof(vSync));
+	mistercast::protocol::EncodeBlitHeader(
+		reinterpret_cast<uint8_t*>(m_bufferSend), sizeof(m_bufferSend), frame, field, vSync);
 	if (cSize > 0)
 	{
 		if (ratio_delta < 0.95)
@@ -691,7 +692,6 @@ void GroovyMister::CmdAudio(uint16_t soundSize)
 uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 {  
 	uint32_t getACKresult = 0;
-	uint32_t frameUDP = fpga.frameEcho;
 	if (dwMilliseconds > 0)
 	{
 		setTimeStart();
@@ -713,7 +713,7 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 				idx=0;
 				do
 				{
-					if (results[idx].BytesTransferred == 13) //blit ACK
+					if (results[idx].BytesTransferred == mistercast::protocol::FpgaStatusSize) //blit ACK
 					{
 						if (dwMilliseconds > 0)
 						{
@@ -724,11 +724,7 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 						{
 							getACKresult = 1;
 						}
-						memcpy(&frameUDP, &m_bufferReceive[0], 4);
-						if (frameUDP > fpga.frameEcho)
-						{
-							setFpgaStatus();
-						}
+						setFpgaStatus();
 					}
 					if (results[idx].BytesTransferred == 1) //getVersion
 					{
@@ -744,8 +740,8 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 						memcpy(&m_core_version, &m_bufferReceive[0], 1);
 					}
 					idx++;
-				} while (idx <= numResults);
-				numResults = m_rio.RIODequeueCompletion(m_receiveQueue, results, numResults);
+				} while (idx < numResults);
+				numResults = m_rio.RIODequeueCompletion(m_receiveQueue, results, RIO_MAX_RESULTS);
 			}
 			m_rio.RIOReceive(m_requestQueue, &m_receiveRioBuffer, 1, 0, &m_receiveRioBuffer);
 		}
@@ -765,14 +761,10 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 			setTimeEnd();
 			diff = DiffTime();
 		}
-		if (len == 13) //blit ACK
+		if (len == mistercast::protocol::FpgaStatusSize) //blit ACK
 		{
 			getACKresult = diff;
-			memcpy(&frameUDP, &m_bufferReceive[0], 4);
-			if (frameUDP > fpga.frameEcho)
-			{
-				setFpgaStatus();
-			}
+			setFpgaStatus();
 		}
 		if (len == 1) //get version
 		{
@@ -1090,27 +1082,33 @@ uint32_t GroovyMister::DiffTime(void)
 #endif
 }
 
-void GroovyMister::setFpgaStatus(void)
+bool GroovyMister::setFpgaStatus(void)
 {
-	uint8_t fpgaBits;
-	memcpy(&fpga.frameEcho, &m_bufferReceive[0], 4);
-	memcpy(&fpga.vCountEcho, &m_bufferReceive[4], 2);
-	memcpy(&fpga.frame, &m_bufferReceive[6], 4);
-	memcpy(&fpga.vCount, &m_bufferReceive[10], 2);
-	memcpy(&fpgaBits, &m_bufferReceive[12], 1);
+	mistercast::protocol::DecodedFpgaStatus status = {};
+	if (!mistercast::protocol::DecodeFpgaStatus(
+		reinterpret_cast<const uint8_t*>(m_bufferReceive), sizeof(m_bufferReceive), status) ||
+		!mistercast::protocol::ShouldAcceptStatus(
+			m_haveFpgaStatus, fpga.frameEcho, status.frameEcho))
+	{
+		return false;
+	}
 
-	bitByte bits;
-	bits.byte = fpgaBits;
-	fpga.vramReady     = bits.u.bit0;
-	fpga.vramEndFrame  = bits.u.bit1;
-	fpga.vramSynced    = bits.u.bit2;
-	fpga.vgaFrameskip  = bits.u.bit3;
-	fpga.vgaVblank     = bits.u.bit4;
-	fpga.vgaF1         = bits.u.bit5;
-	fpga.audio         = bits.u.bit6;
-	fpga.vramQueue     = bits.u.bit7;
+	fpga.frameEcho = status.frameEcho;
+	fpga.vCountEcho = status.vCountEcho;
+	fpga.frame = status.frame;
+	fpga.vCount = status.vCount;
+	fpga.vramReady     = (status.bits & 0x01) != 0;
+	fpga.vramEndFrame  = (status.bits & 0x02) != 0;
+	fpga.vramSynced    = (status.bits & 0x04) != 0;
+	fpga.vgaFrameskip  = (status.bits & 0x08) != 0;
+	fpga.vgaVblank     = (status.bits & 0x10) != 0;
+	fpga.vgaF1         = (status.bits & 0x20) != 0;
+	fpga.audio         = (status.bits & 0x40) != 0;
+	fpga.vramQueue     = (status.bits & 0x80) != 0;
+	m_haveFpgaStatus = true;
 
 	LOG(2,"[MiSTer] ACK %d %d / %d %d / bits(%d%d%d%d%d%d%d%d)\n", fpga.frameEcho, fpga.vCountEcho, fpga.frame, fpga.vCount, fpga.vramReady, fpga.vramEndFrame, fpga.vramSynced, fpga.vgaFrameskip, fpga.vgaVblank, fpga.vgaF1, fpga.audio, fpga.vramQueue);
+	return true;
 }
 
 void GroovyMister::setFpgaJoystick(int len)

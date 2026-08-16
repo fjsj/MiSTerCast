@@ -92,6 +92,7 @@ void BoundsAndChannelTests()
 }
 
 int RunAudioProcessingTests();
+int RunGroovyProtocolTests();
 int RunStreamingTimingTests();
 
 int main()
@@ -100,6 +101,7 @@ int main()
     InterlaceTests();
     BoundsAndChannelTests();
     failures += RunAudioProcessingTests();
+    failures += RunGroovyProtocolTests();
     failures += RunStreamingTimingTests();
 
     if (failures != 0)

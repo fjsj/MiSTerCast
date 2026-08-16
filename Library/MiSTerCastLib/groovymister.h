@@ -187,6 +187,7 @@ class GroovyMister
 	uint32_t m_network_ping;
 	uint8_t m_delta_enabled[2];
 	uint8_t m_isConnected;
+	bool m_haveFpgaStatus;
 
 	char *AllocateBufferSpace(const DWORD bufSize, const DWORD bufCount, DWORD& totalBufferSize, DWORD& totalBufferCount);
 	void Send(void *cmd, int cmdSize);
@@ -194,7 +195,7 @@ class GroovyMister
 	void setTimeStart(void);
 	void setTimeEnd(void);
 	uint32_t DiffTime(void);
-	void setFpgaStatus(void);
+	bool setFpgaStatus(void);
 	void setFpgaJoystick(int len);
 	void setFpgaPS2(int len);
 };
