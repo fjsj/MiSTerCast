@@ -10,6 +10,8 @@ https://github.com/psakhis/Groovy_MiSTer
 The Microsoft VC++ x86 Redistributable is required. You can install it from here: https://aka.ms/vs/17/release/vc_redist.x86.exe
 
 For audio, you will need to enable audio on the Groovy_MiSTer core.
+MiSTerCast converts the default Windows loopback endpoint's 32-bit floating-point mix to stereo signed 16-bit PCM. Mono endpoints are duplicated to stereo; for multichannel endpoints, the front-left and front-right channels are used.
+The Windows sender intentionally forwards the newest audio accumulated during each render cycle instead of adding the Linux PulseAudio prebuffer, preserving the lower-latency WASAPI path for gaming. A long-stall backlog is capped to the newest protocol-safe block.
 
 ## Building from source
 

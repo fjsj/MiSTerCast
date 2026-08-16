@@ -1,14 +1,15 @@
 #pragma once
 
+#include "AudioProcessing.h"
+
 // REFERENCE_TIME time units per second and per millisecond
 #define REFTIMES_PER_SEC  10000000
 #define REFTIMES_PER_MILLISEC  10000
 
-// Buffers
-#define AUDIO_BUFFER_SIZE 10000000
-unsigned int AudioWritePos = 0;
 std::atomic_int audioSampleRate;
-uint16_t* audioBuffer = nullptr;
+int16_t* audioBuffer = nullptr;
+std::vector<int16_t> audioCaptureScratch;
+unsigned int AudioWritePos = 0;
 
 // Audio Capture
 REFERENCE_TIME hnsRequestedDuration = REFTIMES_PER_SEC;
@@ -42,8 +43,21 @@ bool InitAudioCapture()
     EXIT_ON_ERROR(hr, "IMMDevice Activate failed");
 
     hr = pAudioClient->GetMixFormat(&pwfx);
-    audioSampleRate = pwfx->nSamplesPerSec;
     EXIT_ON_ERROR(hr, "IAudioClient GetMixFormat failed");
+    audioSampleRate = pwfx->nSamplesPerSec;
+
+    bool floatFormat = pwfx->wFormatTag == WAVE_FORMAT_IEEE_FLOAT;
+    if (pwfx->wFormatTag == WAVE_FORMAT_EXTENSIBLE && pwfx->cbSize >= 22)
+    {
+        const WAVEFORMATEXTENSIBLE* extensible = reinterpret_cast<const WAVEFORMATEXTENSIBLE*>(pwfx);
+        floatFormat = IsEqualGUID(extensible->SubFormat, KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+    }
+    if (!floatFormat || pwfx->wBitsPerSample != 32 || pwfx->nChannels == 0 ||
+        pwfx->nBlockAlign < pwfx->nChannels * sizeof(float))
+    {
+        LogMessage("The default audio endpoint does not expose 32-bit floating-point loopback audio.", true);
+        return false;
+    }
 
     hr = pAudioClient->Initialize(
         AUDCLNT_SHAREMODE_SHARED,
@@ -91,6 +105,7 @@ bool StopAudioCapture()
 
 bool TickAudioCapture()
 {
+    audioCaptureScratch.clear();
     AudioWritePos = 0;
     UINT32 packetLength = 0;
     HRESULT hr = pCaptureClient->GetNextPacketSize(&packetLength);
@@ -107,31 +122,41 @@ bool TickAudioCapture()
             &flags, NULL, NULL);
         EXIT_ON_ERROR(hr, "IAudioCaptureClient GetBuffer failed");
 
-        if (!audioBuffer)
-            return true;
-
-        bool silence = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
-
-        float* pDataFloat = (float*)pData;
-        unsigned int lFloatsToWrite = numFramesAvailable * pwfx->nBlockAlign / sizeof(float);
-        unsigned int dataPos = 0;
-        while (dataPos < lFloatsToWrite)
+        const bool silence = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
+        // WASAPI is polled once per rendered frame, so forward the accumulated
+        // samples immediately instead of adding the Linux PulseAudio prebuffer.
+        // If rendering stalled long enough to exceed the protocol's 16-bit byte
+        // count, retain the newest audio so latency cannot grow without bound.
+        const size_t framesToKeep = std::min<size_t>(numFramesAvailable, mistercast::MaxAudioValuesPerCommand / 2);
+        const size_t stereoValues = framesToKeep * 2;
+        if (audioCaptureScratch.size() + stereoValues > mistercast::MaxAudioValuesPerCommand)
         {
-            LONG writeLength = std::min(AUDIO_BUFFER_SIZE - AudioWritePos, lFloatsToWrite - dataPos);
-            if (silence)
-            {
-                ZeroMemory(&audioBuffer[AudioWritePos], writeLength * sizeof(audioBuffer[0]));
-            }
-            else
-            {
-                for (int i = 0; i < writeLength; i++)
-                {
-                    audioBuffer[AudioWritePos + i] = (uint16_t)(pDataFloat[dataPos + i] * 32767);
-                }
-            }
+            const size_t excess = audioCaptureScratch.size() + stereoValues - mistercast::MaxAudioValuesPerCommand;
+            std::move(audioCaptureScratch.begin() + excess, audioCaptureScratch.end(), audioCaptureScratch.begin());
+            audioCaptureScratch.resize(audioCaptureScratch.size() - excess);
+        }
 
-            dataPos += writeLength;
-            AudioWritePos = (AudioWritePos + writeLength) % AUDIO_BUFFER_SIZE;
+        const size_t writeOffset = audioCaptureScratch.size();
+        audioCaptureScratch.resize(writeOffset + stereoValues);
+        if (silence)
+        {
+            std::fill(audioCaptureScratch.begin() + writeOffset, audioCaptureScratch.end(), 0);
+        }
+        else
+        {
+            const float* samples = reinterpret_cast<const float*>(pData) +
+                static_cast<size_t>(numFramesAvailable - framesToKeep) * pwfx->nChannels;
+            if (!mistercast::ConvertFloatFramesToStereo(
+                samples,
+                framesToKeep,
+                pwfx->nChannels,
+                audioCaptureScratch.data() + writeOffset,
+                stereoValues))
+            {
+                pCaptureClient->ReleaseBuffer(numFramesAvailable);
+                LogMessage("Unable to convert captured audio to stereo PCM.", true);
+                return false;
+            }
         }
 
         hr = pCaptureClient->ReleaseBuffer(numFramesAvailable);
@@ -139,6 +164,12 @@ bool TickAudioCapture()
 
         hr = pCaptureClient->GetNextPacketSize(&packetLength);
         EXIT_ON_ERROR(hr, "IAudioCaptureClient GetNextPacketSize failed");
+    }
+
+    if (audioBuffer != nullptr && !audioCaptureScratch.empty())
+    {
+        AudioWritePos = static_cast<unsigned int>(audioCaptureScratch.size());
+        std::memcpy(audioBuffer, audioCaptureScratch.data(), AudioWritePos * sizeof(int16_t));
     }
 
     return true;

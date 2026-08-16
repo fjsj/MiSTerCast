@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include "AudioProcessing.h"
+
 uint64_t CurrentTicks()
 {
     // use the standard library clock function
@@ -70,7 +72,6 @@ public:
     void save() {}
     void record() {}
     void toggle_fsfx() {}
-    void add_audio_to_recording(const uint16_t *buffer, int samples_this_frame);
 
 private:
     // npgpu private members
@@ -237,8 +238,8 @@ void renderer_nogpu::draw()
     if (source_config.audio)
     {
         TickAudioCapture();
-        if (AudioWritePos > 0)
-            add_audio_to_recording(audioBuffer, AudioWritePos);
+        if (groovyMister.fpga.audio && AudioWritePos > 0)
+            groovyMister.CmdAudio(static_cast<uint16_t>(AudioWritePos * sizeof(int16_t)));
     }
 
     // Update vsync scanline
@@ -265,8 +266,12 @@ bool renderer_nogpu::nogpu_init()
 
     m_compression = 0x01; // lz4 compression
 
-    switch (audioSampleRate)
+    const uint32_t negotiatedAudioRate = source_config.audio ? audioSampleRate.load() : 0;
+    switch (negotiatedAudioRate)
     {
+    case 0:
+        LogMessage("Audio disabled");
+        break;
     case 22050:
         LogMessage("Audio Freq 22.05KHz");
         break;
@@ -277,7 +282,8 @@ bool renderer_nogpu::nogpu_init()
         LogMessage("Audio Freq 48KHz");
         break;
     default:
-        LogMessage("Unsupported audio sample rate. Only 48kHz, 44.1kHz and 22.05kHz are supported.");
+        LogMessage("Unsupported audio sample rate. Only 48kHz, 44.1kHz and 22.05kHz are supported.", true);
+        return false;
     }
 
     LogMessage("Sending CMD_INIT...");
@@ -285,10 +291,17 @@ bool renderer_nogpu::nogpu_init()
     // Reset current mode
     m_current_mode = {};
 
-    int ret = groovyMister.CmdInit(m_targetip.c_str(), UDP_PORT, m_compression, audioSampleRate, 2, 0, 1500);
+    int ret = groovyMister.CmdInit(
+        m_targetip.c_str(),
+        UDP_PORT,
+        m_compression,
+        negotiatedAudioRate,
+        source_config.audio ? 2 : 0,
+        0,
+        1500);
     if (ret == 0)
     {
-        audioBuffer = (uint16_t*)groovyMister.getPBufferAudio();
+        audioBuffer = reinterpret_cast<int16_t*>(groovyMister.getPBufferAudio());
         return true;
     }
     else
@@ -378,16 +391,4 @@ void renderer_nogpu::nogpu_register_frametime(uint64_t frametime)
     }
 
     time_frame_dm = max_diff;
-}
-
-//============================================================
-//  renderer_nogpu::add_audio_to_recording
-//============================================================
-
-void renderer_nogpu::add_audio_to_recording(const uint16_t *buffer, int samples_this_frame)
-{
-    if (!groovyMister.fpga.audio)
-        return;
-
-    groovyMister.CmdAudio(samples_this_frame << 1);
 }

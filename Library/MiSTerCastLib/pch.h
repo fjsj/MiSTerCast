@@ -29,6 +29,7 @@
 #include <MMDeviceAPI.h>
 #include <AudioClient.h>
 #include <AudioPolicy.h>
+#include <ksmedia.h>
 #include <algorithm>
 
 #include <stdlib.h>

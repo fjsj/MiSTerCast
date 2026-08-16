@@ -91,18 +91,21 @@ void BoundsAndChannelTests()
 }
 }
 
+int RunAudioProcessingTests();
+
 int main()
 {
     RotationTests();
     InterlaceTests();
     BoundsAndChannelTests();
+    failures += RunAudioProcessingTests();
 
     if (failures != 0)
     {
-        std::cerr << failures << " frame transform test(s) failed\n";
+        std::cerr << failures << " core test(s) failed\n";
         return 1;
     }
 
-    std::cout << "All frame transform tests passed\n";
+    std::cout << "All core tests passed\n";
     return 0;
 }

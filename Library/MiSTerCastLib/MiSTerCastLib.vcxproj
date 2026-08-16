@@ -168,6 +168,7 @@
     <None Include="cpp.hint" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="AudioProcessing.h" />
     <ClInclude Include="FrameTransform.h" />
     <ClInclude Include="groovymister.h" />
     <ClInclude Include="MiSTerCastLib.h" />
