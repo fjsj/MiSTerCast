@@ -60,9 +60,7 @@ class renderer_nogpu
 {
 public:
     renderer_nogpu(std::string targetip)
-        : m_bmdata(nullptr)
-        , m_bmsize(0)
-        , m_targetip(targetip)
+        : m_targetip(targetip)
     {
     }
 
@@ -75,9 +73,6 @@ public:
     void add_audio_to_recording(const uint16_t *buffer, int samples_this_frame);
 
 private:
-    std::unique_ptr<uint8_t[]> m_bmdata;
-    size_t                      m_bmsize;
-
     // npgpu private members
     GroovyMister groovyMister;
     bool m_initialized = false;
@@ -153,17 +148,6 @@ void renderer_nogpu::draw()
         old_height = m_height;
     }
 
-    // compute pitch of target
-    unsigned int const pitch = (m_width + 3) & ~3;
-
-    // make sure our temporary bitmap is big enough
-    if ((pitch * m_height * 4) > m_bmsize)
-    {
-        m_bmsize = pitch * m_height * 4 * 2;
-        m_bmdata.reset();
-        m_bmdata = std::make_unique<uint8_t[]>(m_bmsize);
-    }
-
     // initialize nogpu right before first blit
     if (m_first_blit && !m_initialized)
     {
@@ -197,77 +181,23 @@ void renderer_nogpu::draw()
     unsigned int drawIndex = lastVideoCaptureIndex;
     int screenwidth = videoCaptures[drawIndex].width;
     int screenheight = videoCaptures[drawIndex].height;
-    bool drawInt = (m_field == 0);
-
-    int j = 0;
-    
-    float stepx;
-    float stepy;
-    int interlaceStepX = 0;
-    int interlaceStepY = 0;
-    switch (source_config.rotation)
-    {
-    case Rotation::CW90:
-        stepx = ((float)(screenwidth) / (float)m_height);
-        stepy = ((float)(screenheight) / (float)m_width);
-        interlaceStepX = int(stepx / 2.0f);
-    case Rotation::CCW90:
-        stepx = ((float)(screenwidth) / (float)m_height);
-        stepy = ((float)(screenheight) / (float)m_width);
-        interlaceStepX = int(stepx / 2.0f);
-        drawInt = !drawInt;
-        break;
-    case Rotation::Flip180:
-        stepx = ((float)(screenwidth) / (float)m_width);
-        stepy = ((float)(screenheight) / (float)m_height);
-        interlaceStepY = int(stepy / 2.0f);
-        drawInt = !drawInt;
-    default:
-        stepx = ((float)(screenwidth) / (float)m_width);
-        stepy = ((float)(screenheight) / (float)m_height);
-        interlaceStepY = int(stepy / 2.0f);
-        break;
-    }
-
     char* fb = groovyMister.getPBufferBlit(m_field);
-    for (unsigned int i = 0; i < (pitch * m_height * 4); i += 4)
+    const size_t outputSize = Rgb24FrameSize(m_width, m_current_mode.vactive, m_current_mode.interlace);
+    if (!TransformBgraToRgb24(
+        videoCaptures[drawIndex].buffer.data(),
+        screenwidth,
+        screenheight,
+        screenwidth * 4,
+        m_width,
+        m_current_mode.vactive,
+        m_current_mode.interlace,
+        static_cast<uint8_t>(m_field),
+        source_config.rotation,
+        reinterpret_cast<uint8_t*>(fb),
+        outputSize))
     {
-        int x = (i / 4) % m_width;
-        int y = (i / 4) / m_width;
-        int tx = x;
-        switch (source_config.rotation)
-        {
-        case Rotation::CW90:
-            x = m_height - y - 1;
-            y = tx;
-            break;
-        case Rotation::CCW90:
-            x = y;
-            y = m_width - tx - 1;
-            break;
-        case Rotation::Flip180:
-            x = m_width - x - 1;
-            y = m_height - y - 1;
-            break;
-        }
-
-        int bmpx = int(x * stepx);
-        int bmpy = int(y * stepy);
-        if (m_current_mode.interlace && drawInt)
-        {
-            bmpx += interlaceStepX;
-            bmpy += interlaceStepY;
-        }
-        int bmpi = (bmpy * screenwidth + bmpx) * 4;
-        if (bmpi + 4 >= (screenheight * screenwidth * 4))
-            continue;
-
-        
-        fb[j] =     (char)videoCaptures[drawIndex].buffer[bmpi];
-        fb[j + 1] = (char)videoCaptures[drawIndex].buffer[bmpi + 1];
-        fb[j + 2] = (char)videoCaptures[drawIndex].buffer[bmpi + 2];
-
-        j += 3;
+        LogMessage("Unable to transform the captured frame.", true);
+        return;
     }
 
     // change video mode right before the blit

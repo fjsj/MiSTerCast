@@ -202,7 +202,7 @@ MISTERCASTLIB_API bool SetSource(
     source_config.height = ycrop;
     source_config.xoffset = xoffset;
     source_config.yoffset = yoffset;
-    source_config.rotation = rotation;
+    source_config.rotation = static_cast<Rotation>(rotation);
 
     switch (cropmode)
     {

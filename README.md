@@ -29,6 +29,12 @@ From a Visual Studio developer shell, build the release application with:
 msbuild FrontEnd\MiSTerCast.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x86
 ```
 
+Run the native regression tests after building:
+
+```powershell
+Tests\Release\MiSTerCastTests.exe
+```
+
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.
 - At least 1-2 frames of latency.

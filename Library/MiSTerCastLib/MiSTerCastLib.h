@@ -1,3 +1,5 @@
+#include "FrameTransform.h"
+
 #ifdef MISTERCASTLIB_EXPORTS
 #define MISTERCASTLIB_API extern "C" __declspec(dllexport)
 #else
@@ -39,14 +41,6 @@ enum CropMode : int
     Full54,
 };
 
-enum Rotation : int
-{
-    None,
-    CW90,
-    CCW90,
-    Flip180
-};
-
 struct SourceOptions {
     bool syncrefresh;
     UINT16 framedelay;
@@ -59,7 +53,7 @@ struct SourceOptions {
     UINT16 height;
     INT16 xoffset;
     INT16 yoffset;
-    UINT8 rotation;
+    Rotation rotation;
 };
 
 typedef void(__stdcall *log_function)(const char* message, bool error);
