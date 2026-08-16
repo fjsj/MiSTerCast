@@ -873,6 +873,14 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 			bytesToSend = m_RGBSize;
 			headerSize = 8;
 		}
+		if (m_lz4Frames && cSize == 0 && bytesToSend != 0)
+		{
+			// RIO registers the LZ4 buffers whenever compression is enabled. If
+			// incompressible input does not fit in the raw-sized destination,
+			// the protocol falls back to a raw header, so stage that raw field in
+			// the registered buffer selected by the field number.
+			memcpy(m_pBufferLZ4[field], m_pBufferBlit[field], m_RGBSize);
+		}
 	}
 
 #ifdef _WIN32
