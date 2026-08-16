@@ -25,6 +25,7 @@ namespace MiSTerCast
             public string SwitchModelineName;
             public string ModelinesPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "modelines.dat");
             public int DurationSeconds = 10;
+            public int Cycles = 1;
             public int Display = 1;
             public bool Audio = true;
             public bool TestPattern;
@@ -256,11 +257,12 @@ namespace MiSTerCast
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s display={4} audio={5} capture={6}x{7} test_pattern={8}",
+                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9}",
                     address,
                     selected.Name,
                     switched == null ? "" : switched.Name,
                     options.DurationSeconds,
+                    options.Cycles,
                     options.Display,
                     options.Audio,
                     captureWidth,
@@ -304,42 +306,64 @@ namespace MiSTerCast
                     0,
                     0);
 
-                streaming = MiSTerCastInterop.StartStream(address.ToString());
-                if (!streaming)
+                for (int cycle = 1; cycle <= options.Cycles && !Cancellation.IsCancellationRequested; ++cycle)
                 {
-                    QueueLog("Native stream start failed.", true);
-                    return 4;
-                }
+                    if (options.Cycles > 1)
+                        QueueLog(String.Format(CultureInfo.InvariantCulture, "Starting stream cycle {0}/{1}.", cycle, options.Cycles), false);
 
-                if (!ConnectionResult.Wait(TimeSpan.FromSeconds(5)) || Volatile.Read(ref connectionState) != 1)
-                {
-                    QueueLog("MiSTer did not acknowledge stream initialization.", true);
-                    return 5;
-                }
-
-                DateTime started = DateTime.UtcNow;
-                DateTime switchAt = started.AddSeconds(options.DurationSeconds / 2.0);
-                DateTime end = started.AddSeconds(options.DurationSeconds);
-                bool modeSwitched = false;
-                while (!Cancellation.IsCancellationRequested && DateTime.UtcNow < end)
-                {
-                    if (!modeSwitched && switched != null && DateTime.UtcNow >= switchAt)
+                    MiSTerCastInterop.SetModeline(
+                        selected.PixelClock,
+                        selected.HActive,
+                        selected.HBegin,
+                        selected.HEnd,
+                        selected.HTotal,
+                        selected.VActive,
+                        selected.VBegin,
+                        selected.VEnd,
+                        selected.VTotal,
+                        selected.Interlace);
+                    Interlocked.Exchange(ref connectionState, 0);
+                    ConnectionResult.Reset();
+                    streaming = MiSTerCastInterop.StartStream(address.ToString());
+                    if (!streaming)
                     {
-                        QueueLog("Switching live stream to modeline \"" + switched.Name + "\".", false);
-                        MiSTerCastInterop.SetModeline(
-                            switched.PixelClock,
-                            switched.HActive,
-                            switched.HBegin,
-                            switched.HEnd,
-                            switched.HTotal,
-                            switched.VActive,
-                            switched.VBegin,
-                            switched.VEnd,
-                            switched.VTotal,
-                            switched.Interlace);
-                        modeSwitched = true;
+                        QueueLog("Native stream start failed.", true);
+                        return 4;
                     }
-                    Thread.Sleep(50);
+
+                    if (!ConnectionResult.Wait(TimeSpan.FromSeconds(5)) || Volatile.Read(ref connectionState) != 1)
+                    {
+                        QueueLog("MiSTer did not acknowledge stream initialization.", true);
+                        return 5;
+                    }
+
+                    DateTime started = DateTime.UtcNow;
+                    DateTime switchAt = started.AddSeconds(options.DurationSeconds / 2.0);
+                    DateTime end = started.AddSeconds(options.DurationSeconds);
+                    bool modeSwitched = false;
+                    while (!Cancellation.IsCancellationRequested && DateTime.UtcNow < end)
+                    {
+                        if (!modeSwitched && switched != null && DateTime.UtcNow >= switchAt)
+                        {
+                            QueueLog("Switching live stream to modeline \"" + switched.Name + "\".", false);
+                            MiSTerCastInterop.SetModeline(
+                                switched.PixelClock,
+                                switched.HActive,
+                                switched.HBegin,
+                                switched.HEnd,
+                                switched.HTotal,
+                                switched.VActive,
+                                switched.VBegin,
+                                switched.VEnd,
+                                switched.VTotal,
+                                switched.Interlace);
+                            modeSwitched = true;
+                        }
+                        Thread.Sleep(50);
+                    }
+
+                    MiSTerCastInterop.StopStream();
+                    streaming = false;
                 }
 
                 return 0;
@@ -443,6 +467,9 @@ namespace MiSTerCast
                     break;
                 case "--duration":
                     options.DurationSeconds = ParseInt(NextValue(args, ref index, argument), argument, 1, 86400);
+                    break;
+                case "--cycles":
+                    options.Cycles = ParseInt(NextValue(args, ref index, argument), argument, 1, 100);
                     break;
                 case "--display":
                     options.Display = ParseInt(NextValue(args, ref index, argument), argument, 1, 4);
@@ -549,6 +576,7 @@ namespace MiSTerCast
             Console.WriteLine("  --modeline <name>       Preset name from modelines.dat");
             Console.WriteLine("  --switch-modeline <name> Switch to another preset halfway through the run");
             Console.WriteLine("  --duration <seconds>    Streaming time (default: 10)");
+            Console.WriteLine("  --cycles <count>        Repeat start/stop in one process (default: 1)");
             Console.WriteLine("  --display <1-4>         Windows display number (default: 1)");
             Console.WriteLine("  --capture-width <px>    Capture width (default: modeline active width)");
             Console.WriteLine("  --capture-height <px>   Capture height (default: modeline active height)");

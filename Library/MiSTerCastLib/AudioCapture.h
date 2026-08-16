@@ -20,6 +20,7 @@ IMMDevice *pDevice = NULL;
 IAudioClient *pAudioClient = NULL;
 IAudioCaptureClient *pCaptureClient = NULL;
 WAVEFORMATEX *pwfx = NULL;
+bool audioCaptureComInitialized = false;
 
 bool InitAudioCapture()
 {
@@ -27,6 +28,7 @@ bool InitAudioCapture()
 
     hr = CoInitialize(nullptr);
     EXIT_ON_ERROR(hr, "CoInitialize failed");
+    audioCaptureComInitialized = true;
 
     hr = CoCreateInstance(
         __uuidof(MMDeviceEnumerator), NULL,
@@ -77,13 +79,21 @@ bool InitAudioCapture()
     return true;
 }
 
-void CleanupAudioCatpure()
+void CleanupAudioCapture()
 {
     CoTaskMemFree(pwfx);
-    SAFE_RELEASE(pEnumerator)
-    SAFE_RELEASE(pDevice)
-    SAFE_RELEASE(pAudioClient)
+    pwfx = nullptr;
     SAFE_RELEASE(pCaptureClient)
+    SAFE_RELEASE(pAudioClient)
+    SAFE_RELEASE(pDevice)
+    SAFE_RELEASE(pEnumerator)
+    audioBuffer = nullptr;
+    audioSampleRate = 0;
+    if (audioCaptureComInitialized)
+    {
+        CoUninitialize();
+        audioCaptureComInitialized = false;
+    }
 }
 
 bool StartAudioCapture()

@@ -16,6 +16,10 @@ void LogMessage(std::string message, bool error)
 std::atomic_bool stopCapture = false;
 std::atomic_bool stopStream = false;
 std::string targetIpString;
+std::unique_ptr<std::thread> captureScreenTask;
+std::unique_ptr<std::thread> castScreenTask;
+std::mutex captureTaskMutex;
+std::mutex castTaskMutex;
 
 #include "groovymister.h"
 #include "renderer_nogpu.h"
@@ -24,54 +28,113 @@ std::atomic_bool capturing_screen = false;
 void capture_screen()
 {
     LogMessage("Screen capture starting.");
-    capturing_screen = true;
-    do
+    try
     {
-        TickVideoCapture();
-    } while (!stopCapture);
+        do
+        {
+            TickVideoCapture();
+        } while (!stopCapture.load(std::memory_order_acquire));
+    }
+    catch (const std::exception& exception)
+    {
+        LogMessage("Screen capture stopped after an unexpected error: " + std::string(exception.what()), true);
+    }
+    catch (...)
+    {
+        LogMessage("Screen capture stopped after an unexpected error.", true);
+    }
     capturing_screen = false;
     LogMessage("Screen capture stopped.");
+}
+
+bool start_capture_worker()
+{
+    std::lock_guard<std::mutex> lock(captureTaskMutex);
+    if (captureScreenTask != nullptr)
+    {
+        LogMessage("Screen capture is already running.", true);
+        return false;
+    }
+
+    stopCapture.store(false, std::memory_order_release);
+    capturing_screen.store(true, std::memory_order_release);
+    try
+    {
+        captureScreenTask = std::make_unique<std::thread>(capture_screen);
+        return true;
+    }
+    catch (const std::exception& exception)
+    {
+        capturing_screen.store(false, std::memory_order_release);
+        LogMessage("Starting screen capture failed: " + std::string(exception.what()), true);
+        return false;
+    }
+}
+
+void stop_capture_worker()
+{
+    std::lock_guard<std::mutex> lock(captureTaskMutex);
+    stopCapture.store(true, std::memory_order_release);
+    if (captureScreenTask != nullptr)
+    {
+        if (captureScreenTask->joinable())
+            captureScreenTask->join();
+        captureScreenTask.reset();
+    }
+    capturing_screen.store(false, std::memory_order_release);
+    stopCapture.store(false, std::memory_order_release);
 }
 
 std::atomic_bool casting_screen = false;
 void cast_screen()
 {
     const SourceOptions streamSource = source_config.snapshot();
+    bool audioStarted = false;
 
-    if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST))
+    try
     {
-        LogMessage("Setting cast screen thread priority failed: " + std::to_string(GetLastError()), true);
-    }
-
-    if (streamSource.audio)
-    {
-        LogMessage("Audio capture starting.");
-        StartAudioCapture();
-    }
-
-    LogMessage("Casting to MiSTer starting.");
-    casting_screen = true;
-    {
-        auto renderer = std::make_unique<renderer_nogpu>(targetIpString, streamSource.audio);
+        if (!SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_HIGHEST))
         {
-            do
+            LogMessage("Setting cast screen thread priority failed: " + std::to_string(GetLastError()), true);
+        }
+
+        if (streamSource.audio)
+        {
+            LogMessage("Audio capture starting.");
+            audioStarted = StartAudioCapture();
+        }
+
+        LogMessage("Casting to MiSTer starting.");
+        {
+            auto renderer = std::make_unique<renderer_nogpu>(targetIpString, audioStarted);
             {
-                renderer->draw();
-            } while (!stopStream);
+                do
+                {
+                    renderer->draw();
+                } while (!stopStream.load(std::memory_order_acquire));
+            }
         }
     }
-    casting_screen = false;
+    catch (const std::exception& exception)
+    {
+        LogMessage("Casting stopped after an unexpected error: " + std::string(exception.what()), true);
+    }
+    catch (...)
+    {
+        LogMessage("Casting stopped after an unexpected error.", true);
+    }
+
     LogMessage("Casting to MiSTer stopped.");
 
-    if (streamSource.audio)
+    if (audioStarted)
     {
         StopAudioCapture();
         LogMessage("Audio capture stopped.");
     }
+    casting_screen.store(false, std::memory_order_release);
 }
 
 bool initialized = false;
-std::unique_ptr<std::thread> captureScreenTask;
 MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnCapture)
 {
     if (initialized)
@@ -108,12 +171,15 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
     if (!InitializeVideoCapture(0, fnCapture))
     {
         LogMessage("Failed to initialize video capture.", true);
+        CleanupVideoCapture();
         return false;
     }
 
     if (!InitAudioCapture())
     {
         LogMessage("Failed to initialize audio capture.", true);
+        CleanupAudioCapture();
+        CleanupVideoCapture();
         return false;
     }
 
@@ -121,7 +187,12 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
     for (int i = 0; i < BUFFER_COUNT; i++)
         TickVideoCapture();
 
-    captureScreenTask = std::make_unique<std::thread>(capture_screen);
+    if (!start_capture_worker())
+    {
+        CleanupAudioCapture();
+        CleanupVideoCapture();
+        return false;
+    }
 
     LogMessage("MiSTerCast ready.");
 
@@ -131,33 +202,68 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
 
 MISTERCASTLIB_API bool Shutdown()
 {
-    stopCapture = true;
-    do {} while (capturing_screen); // wait for threads
-    stopCapture = false;
+    StopStream();
+    stop_capture_worker();
 
-    captureScreenTask->detach();
+    CleanupVideoCapture();
+    CleanupAudioCapture();
+    delete[] videoCaptures;
+    videoCaptures = nullptr;
+    initialized = false;
 
     return true;
 }
 
-std::unique_ptr<std::thread> castScreenTask;
-
 MISTERCASTLIB_API bool StartStream(const char* targetIp)
 {
+    std::lock_guard<std::mutex> lock(castTaskMutex);
+    if (!initialized)
+    {
+        LogMessage("MiSTerCast must be initialized before starting a stream.", true);
+        return false;
+    }
+    if (targetIp == nullptr || targetIp[0] == '\0')
+    {
+        LogMessage("A target IPv4 address is required.", true);
+        return false;
+    }
+    if (castScreenTask != nullptr)
+    {
+        LogMessage("A stream is already running. Stop it before starting another.", true);
+        return false;
+    }
+
     targetIpString = std::string(targetIp);
     LogMessage("Starting stream to " + targetIpString + ".");
-    castScreenTask = std::make_unique<std::thread>(cast_screen);
+    stopStream.store(false, std::memory_order_release);
+    casting_screen.store(true, std::memory_order_release);
+    try
+    {
+        castScreenTask = std::make_unique<std::thread>(cast_screen);
+    }
+    catch (const std::exception& exception)
+    {
+        casting_screen.store(false, std::memory_order_release);
+        LogMessage("Starting the stream worker failed: " + std::string(exception.what()), true);
+        return false;
+    }
 
     return true;
 }
 
 MISTERCASTLIB_API bool StopStream()
 {
-    stopStream = true;
-    do {} while (casting_screen); // wait for threads
-    stopStream = false;
+    std::lock_guard<std::mutex> lock(castTaskMutex);
+    stopStream.store(true, std::memory_order_release);
+    if (castScreenTask != nullptr)
+    {
+        if (castScreenTask->joinable())
+            castScreenTask->join();
+        castScreenTask.reset();
+    }
 
-    castScreenTask->detach();
+    casting_screen.store(false, std::memory_order_release);
+    stopStream.store(false, std::memory_order_release);
     return true;
 }
 
@@ -247,11 +353,7 @@ MISTERCASTLIB_API bool SetSource(
 
     if (displayIndex != source.display)
     {
-        stopCapture = true;
-        do {} while (capturing_screen); // wait for threads
-        stopCapture = false;
-
-        captureScreenTask->detach();
+        stop_capture_worker();
         CleanupVideoCapture();
         source_config.publish(source);
         if (!InitializeVideoCapture(source.display, captureFunction))
@@ -260,12 +362,13 @@ MISTERCASTLIB_API bool SetSource(
             CleanupVideoCapture();
             source_config.publish(previousSource);
             if (InitializeVideoCapture(previousSource.display, captureFunction))
-                captureScreenTask = std::make_unique<std::thread>(capture_screen);
+                start_capture_worker();
             else
                 LogMessage("Failed to restore the previous video capture source.", true);
             return false;
         }
-        captureScreenTask = std::make_unique<std::thread>(capture_screen);
+        if (!start_capture_worker())
+            return false;
     }
     else
     {

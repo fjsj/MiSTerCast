@@ -201,7 +201,10 @@ void renderer_nogpu::draw()
 
     // only send frame if nogpu is initialized
     if (!m_initialized)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return;
+    }
 
     // Apply the receiver mode before selecting a field and transforming the
     // next payload. Applying it later mixed the new active size with the old
