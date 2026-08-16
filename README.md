@@ -13,6 +13,8 @@ For audio, you will need to enable audio on the Groovy_MiSTer core.
 MiSTerCast converts the default Windows loopback endpoint's 32-bit floating-point mix to stereo signed 16-bit PCM. Mono endpoints are duplicated to stereo; for multichannel endpoints, the front-left and front-right channels are used.
 The Windows sender intentionally forwards the newest audio accumulated during each render cycle instead of adding the Linux PulseAudio prebuffer, preserving the lower-latency WASAPI path for gaming. A long-stall backlog is capped to the newest protocol-safe block.
 
+Frame-delay requests are sent to the MiSTer core and raster pacing is calculated from the active modeline. Automatic interlaced output limits the requested sync line to the first half of the raster so an alternating field upload cannot race the field being displayed. Manual frame-delay values remain explicit and are not capped this way.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:

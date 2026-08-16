@@ -10,6 +10,7 @@
 #pragma once
 
 #include "AudioProcessing.h"
+#include "StreamingTiming.h"
 
 uint64_t CurrentTicks()
 {
@@ -24,11 +25,6 @@ uint64_t TicksPerSecond() noexcept
     LARGE_INTEGER val;
     QueryPerformanceFrequency(&val);
     return val.QuadPart;
-}
-
-void SleepTicks(uint64_t duration) noexcept
-{
-    std::this_thread::sleep_for(std::chrono::high_resolution_clock::duration(duration));
 }
 
 inline double get_ms(uint64_t ticks) { return (double)ticks / TicksPerSecond() * 1000; };
@@ -98,7 +94,6 @@ private:
     uint64_t time_frame[16];
     uint64_t time_frame_avg = 0;
     uint64_t time_frame_dm = 0;
-    uint64_t time_sleep = uint64_t(TicksPerSecond() / 1000.0); // 1 ms
 
     int m_sockfd = -1; //INVALID_SOCKET;
     sockaddr_in m_server_addr;
@@ -125,7 +120,7 @@ int renderer_nogpu::create()
 renderer_nogpu::~renderer_nogpu()
 {
     // Wait for fpga to flush last blit
-    SleepTicks(uint64_t(m_period * time_sleep));
+    std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(m_period));
 
     LogMessage("Sending CMD_CLOSE...");
     groovyMister.CmdClose();
@@ -243,10 +238,14 @@ void renderer_nogpu::draw()
     }
 
     // Update vsync scanline
-    m_vsync_scanline = std::min<int>(int((m_current_mode.vtotal) * m_frame_delay + vsync_offset + 1), m_current_mode.vtotal);
+    m_vsync_scanline = mistercast::RequestedSyncLine(
+        m_current_mode.vtotal,
+        m_frame_delay + (m_current_mode.vtotal == 0 ? 0.0 : (double)vsync_offset / m_current_mode.vtotal),
+        m_current_mode.interlace,
+        source_config.framedelay == 0);
 
     // Blit now
-    groovyMister.CmdBlit(m_frame, m_field, 0/*m_vsync_scanline*/, 15000, 0);
+    groovyMister.CmdBlit(m_frame, m_field, static_cast<uint16_t>(m_vsync_scanline), 15000, 0);
     groovyMister.WaitSync();
 
     time_blit = CurrentTicks();
@@ -331,6 +330,15 @@ bool renderer_nogpu::nogpu_switch_video_mode()
     m_vtotal = mode->vtotal;
     m_field = 0;
 
+    const double linePeriod = mistercast::LinePeriodMilliseconds(mode->pclock, mode->htotal);
+    const double fieldPeriod = mistercast::FieldPeriodMilliseconds(
+        mode->pclock, mode->htotal, mode->vtotal, mode->interlace);
+    if (linePeriod > 0.0 && fieldPeriod > 0.0)
+    {
+        m_line_period = linePeriod;
+        m_period = fieldPeriod;
+    }
+
     shouldUpdateVideoMode = false;
     groovyMister.CmdSwitchres(
         mode->pclock,
@@ -368,7 +376,7 @@ void renderer_nogpu::nogpu_register_frametime(uint64_t frametime)
     time_frame[i] = frametime;
     i++;
 
-    if (i > max_regs)
+    if (i >= max_regs)
         i = 0;
 
     if (regs < max_regs)
@@ -382,9 +390,11 @@ void renderer_nogpu::nogpu_register_frametime(uint64_t frametime)
     // Compute current max deviation
     uint64_t max_diff = 0;
 
-    for (int k = 1; k <= regs; k++)
+    for (int k = 1; k < regs; k++)
     {
-        diff = time_frame[k] - time_frame[k - 1];
+        diff = time_frame[k] >= time_frame[k - 1]
+            ? time_frame[k] - time_frame[k - 1]
+            : time_frame[k - 1] - time_frame[k];
 
         if (diff > 0 && diff > max_diff)
             max_diff = diff;

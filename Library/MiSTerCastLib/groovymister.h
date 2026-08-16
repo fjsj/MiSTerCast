@@ -151,6 +151,7 @@ class GroovyMister
 	LARGE_INTEGER m_tickEnd;
 	LARGE_INTEGER m_tickSync;
 	LARGE_INTEGER m_tickCongestion;
+	uint64_t m_timerFrequency;
 #else
 	int m_sockFD;
 	int m_sockInputsFD;

@@ -170,6 +170,7 @@
   <ItemGroup>
     <ClInclude Include="AudioProcessing.h" />
     <ClInclude Include="FrameTransform.h" />
+    <ClInclude Include="StreamingTiming.h" />
     <ClInclude Include="groovymister.h" />
     <ClInclude Include="MiSTerCastLib.h" />
     <ClInclude Include="pch.h" />

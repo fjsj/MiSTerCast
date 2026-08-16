@@ -1,5 +1,6 @@
 #include "pch.h"
 #include "groovymister.h"
+#include "StreamingTiming.h"
 
 #include <stdint.h>
 #include <stdio.h>
@@ -115,6 +116,12 @@ GroovyMister::GroovyMister()
 	memset(&m_tickEnd, 0, sizeof(m_tickEnd));
 	memset(&m_tickSync, 0, sizeof(m_tickSync));
 	memset(&m_tickCongestion, 0, sizeof(m_tickCongestion));
+#ifdef _WIN32
+	LARGE_INTEGER timerFrequency;
+	m_timerFrequency = QueryPerformanceFrequency(&timerFrequency)
+		? static_cast<uint64_t>(timerFrequency.QuadPart)
+		: mistercast::HundredNanosecondsPerSecond;
+#endif
 
 	DWORD totalBufferCount = 0;
 	DWORD totalBufferSize = 0;
@@ -1060,7 +1067,11 @@ inline void GroovyMister::setTimeEnd(void)
 uint32_t GroovyMister::DiffTime(void)
 {
 #ifdef _WIN32
-	return m_tickEnd.QuadPart - m_tickStart.QuadPart;
+	if (m_tickEnd.QuadPart <= m_tickStart.QuadPart)
+		return 0;
+	return mistercast::CounterTicksTo100ns(
+		static_cast<uint64_t>(m_tickEnd.QuadPart - m_tickStart.QuadPart),
+		m_timerFrequency);
 #else
 	uint32_t diffTime = 0;
 	timespec temp;

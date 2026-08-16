@@ -92,6 +92,7 @@ void BoundsAndChannelTests()
 }
 
 int RunAudioProcessingTests();
+int RunStreamingTimingTests();
 
 int main()
 {
@@ -99,6 +100,7 @@ int main()
     InterlaceTests();
     BoundsAndChannelTests();
     failures += RunAudioProcessingTests();
+    failures += RunStreamingTimingTests();
 
     if (failures != 0)
     {
