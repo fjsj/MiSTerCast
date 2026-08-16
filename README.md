@@ -56,10 +56,10 @@ FrontEnd\bin\Release\MiSTerCastCli.exe --list-modelines
 Run a 15-second direct-Ethernet interlaced test:
 
 ```powershell
-FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x480i NTSC (60Hz)" --duration 15
+FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x480i NTSC (60Hz)" --duration 15 --test-pattern
 ```
 
-Use `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
+`--test-pattern` temporarily covers the selected Windows display with a moving frame counter, then closes it when the run ends. Use `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
 
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.

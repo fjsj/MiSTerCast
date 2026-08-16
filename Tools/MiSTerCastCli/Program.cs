@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Drawing;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -9,6 +11,7 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 
 namespace MiSTerCast
 {
@@ -22,6 +25,7 @@ namespace MiSTerCast
             public int DurationSeconds = 10;
             public int Display = 1;
             public bool Audio = true;
+            public bool TestPattern;
             public ushort? CaptureWidth;
             public ushort? CaptureHeight;
             public bool ListModelines;
@@ -41,6 +45,115 @@ namespace MiSTerCast
             public ushort VEnd;
             public ushort VTotal;
             public bool Interlace;
+        }
+
+        private sealed class TestPatternHost : IDisposable
+        {
+            private readonly int displayIndex;
+            private readonly ManualResetEventSlim shown = new ManualResetEventSlim(false);
+            private Thread thread;
+            private TestPatternForm form;
+
+            public TestPatternHost(int display)
+            {
+                displayIndex = display - 1;
+            }
+
+            public void Start()
+            {
+                thread = new Thread(Run);
+                thread.IsBackground = true;
+                thread.SetApartmentState(ApartmentState.STA);
+                thread.Start();
+                if (!shown.Wait(TimeSpan.FromSeconds(5)))
+                    throw new InvalidOperationException("The full-screen test pattern did not open.");
+            }
+
+            private void Run()
+            {
+                Application.EnableVisualStyles();
+                Application.SetCompatibleTextRenderingDefault(false);
+                Screen[] screens = Screen.AllScreens;
+                if (displayIndex < 0 || displayIndex >= screens.Length)
+                {
+                    shown.Set();
+                    return;
+                }
+
+                form = new TestPatternForm(screens[displayIndex]);
+                form.Shown += (sender, args) => shown.Set();
+                Application.Run(form);
+            }
+
+            public void Dispose()
+            {
+                if (form != null && form.IsHandleCreated)
+                    form.BeginInvoke(new Action(form.Close));
+                if (thread != null && !thread.Join(TimeSpan.FromSeconds(5)))
+                    QueueLog("Test-pattern window did not close within five seconds.", true);
+                shown.Dispose();
+            }
+        }
+
+        private sealed class TestPatternForm : Form
+        {
+            private readonly System.Windows.Forms.Timer timer;
+            private readonly Stopwatch stopwatch = Stopwatch.StartNew();
+            private readonly Font counterFont = new Font(FontFamily.GenericMonospace, 72, FontStyle.Bold, GraphicsUnit.Pixel);
+            private readonly StringFormat centered = new StringFormat
+            {
+                Alignment = StringAlignment.Center,
+                LineAlignment = StringAlignment.Center,
+            };
+            private long frame;
+
+            public TestPatternForm(Screen screen)
+            {
+                AutoScaleMode = AutoScaleMode.None;
+                Bounds = screen.Bounds;
+                FormBorderStyle = FormBorderStyle.None;
+                StartPosition = FormStartPosition.Manual;
+                ShowInTaskbar = false;
+                TopMost = true;
+                DoubleBuffered = true;
+                timer = new System.Windows.Forms.Timer { Interval = 16 };
+                timer.Tick += (sender, args) =>
+                {
+                    frame++;
+                    Invalidate();
+                };
+                Shown += (sender, args) => timer.Start();
+            }
+
+            protected override void OnPaint(PaintEventArgs args)
+            {
+                base.OnPaint(args);
+                bool odd = (frame & 1) != 0;
+                args.Graphics.Clear(odd ? Color.FromArgb(12, 26, 48) : Color.FromArgb(36, 12, 42));
+
+                int bandWidth = Math.Max(ClientSize.Width / 12, 1);
+                int movingBand = (int)(frame % 12) * bandWidth;
+                using (Brush band = new SolidBrush(odd ? Color.Cyan : Color.Magenta))
+                    args.Graphics.FillRectangle(band, movingBand, 0, bandWidth, ClientSize.Height);
+
+                string text = String.Format(
+                    CultureInfo.InvariantCulture,
+                    "MiSTerCast E2E\nFRAME {0:D8}\n{1,8:F3} s",
+                    frame,
+                    stopwatch.Elapsed.TotalSeconds);
+                args.Graphics.DrawString(text, counterFont, Brushes.White, ClientRectangle, centered);
+            }
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    timer.Dispose();
+                    counterFont.Dispose();
+                    centered.Dispose();
+                }
+                base.Dispose(disposing);
+            }
         }
 
         private static readonly BlockingCollection<string> LogQueue = new BlockingCollection<string>();
@@ -117,19 +230,28 @@ namespace MiSTerCast
 
             bool initialized = false;
             bool streaming = false;
+            TestPatternHost testPattern = null;
             try
             {
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" duration={2}s display={3} audio={4} capture={5}x{6}",
+                    "E2E target={0} modeline=\"{1}\" duration={2}s display={3} audio={4} capture={5}x{6} test_pattern={7}",
                     address,
                     selected.Name,
                     options.DurationSeconds,
                     options.Display,
                     options.Audio,
                     captureWidth,
-                    captureHeight), false);
+                    captureHeight,
+                    options.TestPattern), false);
+
+                if (options.TestPattern)
+                {
+                    testPattern = new TestPatternHost(options.Display);
+                    testPattern.Start();
+                    Thread.Sleep(500);
+                }
 
                 initialized = MiSTerCastInterop.Initialize(logDelegate, captureDelegate);
                 if (!initialized)
@@ -186,6 +308,7 @@ namespace MiSTerCast
                     MiSTerCastInterop.StopStream();
                 if (initialized)
                     MiSTerCastInterop.Shutdown();
+                testPattern?.Dispose();
                 Console.CancelKeyPress -= OnCancelKeyPress;
                 LogQueue.CompleteAdding();
                 logTask.Wait();
@@ -260,6 +383,9 @@ namespace MiSTerCast
                     break;
                 case "--no-audio":
                     options.Audio = false;
+                    break;
+                case "--test-pattern":
+                    options.TestPattern = true;
                     break;
                 case "--target":
                     options.Target = NextValue(args, ref index, argument);
@@ -381,6 +507,7 @@ namespace MiSTerCast
             Console.WriteLine("  --capture-width <px>    Capture width (default: modeline active width)");
             Console.WriteLine("  --capture-height <px>   Capture height (default: modeline active height)");
             Console.WriteLine("  --no-audio              Disable loopback audio");
+            Console.WriteLine("  --test-pattern          Show a full-screen moving frame counter on the captured display");
             Console.WriteLine("  --list-modelines        List preset names and exit");
             Console.WriteLine("  --modelines <path>      Use another modelines.dat file");
         }
