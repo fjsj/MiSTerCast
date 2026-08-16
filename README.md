@@ -17,6 +17,8 @@ Frame-delay requests are sent to the MiSTer core and raster pacing is calculated
 
 MiSTer status packets are decoded explicitly as little-endian protocol data. Status ordering follows the wrapping 32-bit frame counter, so a long-running stream continues to accept acknowledgements when the counter rolls over.
 
+Interlaced field-buffer output starts from a deterministic local field-zero phase after every mode switch, then locks to FPGA field feedback from the first acknowledged post-switch blit. If the sender falls behind or skips a frame, that feedback advances the frame counter and re-selects the correct alternating field instead of allowing the field order to remain reversed.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:
