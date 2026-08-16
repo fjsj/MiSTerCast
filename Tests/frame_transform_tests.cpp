@@ -95,6 +95,7 @@ int RunAudioProcessingTests();
 int RunGroovyProtocolTests();
 int RunInterlacePhaseTests();
 int RunStreamingTimingTests();
+int RunTransportLifecycleTests();
 
 int main()
 {
@@ -105,6 +106,7 @@ int main()
     failures += RunGroovyProtocolTests();
     failures += RunInterlacePhaseTests();
     failures += RunStreamingTimingTests();
+    failures += RunTransportLifecycleTests();
 
     if (failures != 0)
     {

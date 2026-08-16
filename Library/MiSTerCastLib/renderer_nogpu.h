@@ -161,7 +161,13 @@ void renderer_nogpu::draw()
 
     // only send frame if nogpu is initialized
     if (!m_initialized)
+    {
+        // A failed target remains stoppable from the GUI without spinning a
+        // core while it waits for the user to stop and retry the stream.
+        if (!m_first_blit)
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         return;
+    }
 
     // Reset the transport phase before selecting and sampling the first field
     // of a new mode. Selecting a field before CMD_SWITCHRES would use stale
@@ -258,8 +264,6 @@ void renderer_nogpu::draw()
 
 bool renderer_nogpu::nogpu_init()
 {
-    int result;
-
     m_compression = 0x01; // lz4 compression
 
     const uint32_t negotiatedAudioRate = source_config.audio ? audioSampleRate.load() : 0;
