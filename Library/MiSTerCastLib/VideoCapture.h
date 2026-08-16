@@ -99,7 +99,15 @@ bool InitializeVideoCapture(int outputNumber, capture_image_function fnCapture)
     dxgiOutput = nullptr;
     EXIT_ON_ERROR(hr, "DxgiOutput->QueryInterface faile");
 
-    hr = dxgiOutput1->DuplicateOutput(d3dDevice, &desktopDuplication);
+    constexpr int duplicateOutputAttempts = 10;
+    for (int attempt = 0; attempt < duplicateOutputAttempts; ++attempt)
+    {
+        hr = dxgiOutput1->DuplicateOutput(d3dDevice, &desktopDuplication);
+        if (SUCCEEDED(hr) || (hr != E_ACCESSDENIED && hr != DXGI_ERROR_ACCESS_LOST))
+            break;
+        if (attempt + 1 < duplicateOutputAttempts)
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
     dxgiOutput1->Release();
     dxgiOutput1 = nullptr;
     EXIT_ON_ERROR(hr, "DxgiOutput1->DuplicateOutput failed");
@@ -118,7 +126,15 @@ void CleanupVideoCapture()
 bool TickVideoCapture()
 {
     if (!desktopDuplication)
+    {
+        // Desktop switches and secure-desktop prompts can invalidate or deny
+        // duplication temporarily. Keep the capture worker alive so it can
+        // recover after the interactive desktop becomes available again.
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        CleanupVideoCapture();
+        InitializeVideoCapture(displayIndex, captureFunction);
         return false;
+    }
 
     HRESULT hr;
 
