@@ -2,7 +2,6 @@
 #define __GROOVYMISTER_H__
 
 #include <inttypes.h>
-#include "InterlacePhase.h"
 
 #ifdef _WIN32
  #include <winsock2.h>
@@ -113,8 +112,6 @@ class GroovyMister
 	void CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, uint32_t margin, uint32_t matchDeltaBytes);
 	// Stream audio
 	void CmdAudio(uint16_t soundSize);
-	// Align an outgoing frame and field to the latest acknowledged FPGA phase.
-	void AlignFrame(uint32_t& frame, uint8_t& field);
 	// getACK is used internal on WaitSync, dwMilliseconds = 0 will time out immediately if no new data
 	uint32_t getACK(DWORD dwMilliseconds);
 	// sleep to sync with crt raster
@@ -191,7 +188,6 @@ class GroovyMister
 	uint8_t m_delta_enabled[2];
 	uint8_t m_isConnected;
 	bool m_haveFpgaStatus;
-	mistercast::InterlacePhase m_interlacePhase;
 
 	char *AllocateBufferSpace(const DWORD bufSize, const DWORD bufCount, DWORD& totalBufferSize, DWORD& totalBufferCount);
 	void Send(void *cmd, int cmdSize);

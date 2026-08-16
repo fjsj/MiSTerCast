@@ -75,8 +75,8 @@ private:
     bool m_initialized = false;
     bool m_first_blit = true;
     int m_compression = 0;
-    uint32_t m_frame = 0;
-    uint8_t m_field = 0;
+    int m_frame = 0;
+    int m_field = 0;
     unsigned int m_width = 0;
     unsigned int m_height = 0;
     int m_vtotal = 0;
@@ -163,17 +163,16 @@ void renderer_nogpu::draw()
     if (!m_initialized)
         return;
 
-    // Reset the transport phase before selecting and sampling the first field
-    // of a new mode. Selecting a field before CMD_SWITCHRES would use stale
-    // feedback from the previous raster for that first upload.
-    if (shouldUpdateVideoMode)
-        nogpu_switch_video_mode();
-
     m_frame++;
 
-    // Use only post-mode-switch FPGA feedback as authoritative field phase.
-    // This re-locks after skipped frames without adopting stale pre-switch state.
-    groovyMister.AlignFrame(m_frame, m_field);
+    if (groovyMister.fpga.frame > m_frame)
+        m_frame = groovyMister.fpga.frame + 1;
+
+    // get current field for interlaced mode
+    if (m_current_mode.interlace)
+        m_field = !groovyMister.fpga.vgaF1 ^ ((m_frame - groovyMister.fpga.frame) % 2);
+    else
+        m_field = 0;
 
     unsigned int drawIndex = lastVideoCaptureIndex;
     int screenwidth = videoCaptures[drawIndex].width;
@@ -196,6 +195,10 @@ void renderer_nogpu::draw()
         LogMessage("Unable to transform the captured frame.", true);
         return;
     }
+
+    // change video mode right before the blit
+    if (shouldUpdateVideoMode)
+        nogpu_switch_video_mode();
 
     bool valid_status = true;
 
