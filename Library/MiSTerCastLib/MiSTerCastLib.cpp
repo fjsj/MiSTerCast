@@ -135,8 +135,8 @@ std::unique_ptr<std::thread> castScreenTask;
 
 MISTERCASTLIB_API bool StartStream(const char* targetIp)
 {
-    LogMessage("Starting stream.");
     targetIpString = std::string(targetIp);
+    LogMessage("Starting stream to " + targetIpString + ".");
     castScreenTask = std::make_unique<std::thread>(cast_screen);
 
     return true;
