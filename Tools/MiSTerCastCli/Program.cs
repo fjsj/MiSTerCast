@@ -50,6 +50,7 @@ namespace MiSTerCast
         private static MiSTerCastInterop.CaptureImageDelegate captureDelegate;
         private static int connectionState;
 
+        [STAThread]
         private static int Main(string[] args)
         {
             try
