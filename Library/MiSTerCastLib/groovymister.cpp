@@ -38,6 +38,9 @@
 #define CMD_BLIT_FIELD_VSYNC 7
 #define CMD_GET_VERSION 8
 
+#define INIT_ACK_ATTEMPTS 3
+#define INIT_ACK_TIMEOUT_MS 200
+
 typedef union
 {
 	struct
@@ -113,6 +116,45 @@ GroovyMister::GroovyMister()
 	m_delta_enabled[1] = 0;
 	m_isConnected = 0;
 	m_haveFpgaStatus = false;
+	m_droppedVideoBatches = 0;
+	m_droppedAudioBatches = 0;
+	m_transportErrors = 0;
+
+#ifdef _WIN32
+	m_sockFD = INVALID_SOCKET;
+	m_sockInputsFD = INVALID_SOCKET;
+	memset(&m_rio, 0, sizeof(m_rio));
+	m_sendQueue = RIO_INVALID_CQ;
+	m_receiveQueue = RIO_INVALID_CQ;
+	m_requestQueue = RIO_INVALID_RQ;
+	m_hIOCP = NULL;
+	memset(&m_receiveOverlapped, 0, sizeof(m_receiveOverlapped));
+	m_sendRioBufferId = RIO_INVALID_BUFFERID;
+	m_receiveRioBufferId = RIO_INVALID_BUFFERID;
+	m_sendRioBufferAudioId = RIO_INVALID_BUFFERID;
+	memset(m_sendRioBuffers, 0, sizeof(m_sendRioBuffers));
+	memset(m_rioCommandBuffers, 0, sizeof(m_rioCommandBuffers));
+	memset(m_commandSlotOutstanding, 0, sizeof(m_commandSlotOutstanding));
+	memset(&m_receiveRioBuffer, 0, sizeof(m_receiveRioBuffer));
+	memset(&m_sendRioBufferAudio, 0, sizeof(m_sendRioBufferAudio));
+	m_pBufsAudio = nullptr;
+	for (int field = 0; field < 2; ++field)
+	{
+		m_sendRioBufferBlitId[field] = RIO_INVALID_BUFFERID;
+		m_pBufsBlit[field] = nullptr;
+		m_outstandingBlitSends[field] = 0;
+	}
+	m_wsaStarted = false;
+	m_rioFunctionsReady = false;
+	m_receiveNotificationArmed = false;
+	m_rioFailed = false;
+	m_outstandingRioSends = 0;
+	m_outstandingRioReceives = 0;
+	m_outstandingAudioSends = 0;
+#else
+	m_sockFD = -1;
+	m_sockInputsFD = -1;
+#endif
 
 	memset(&m_tickStart, 0, sizeof(m_tickStart));
 	memset(&m_tickEnd, 0, sizeof(m_tickEnd));
@@ -139,6 +181,7 @@ GroovyMister::GroovyMister()
 
 GroovyMister::~GroovyMister()
 {
+	CmdClose();
 #ifdef _WIN32
 	VirtualFree(m_pBufferAudio, 0, MEM_RELEASE);
 	VirtualFree(m_pBufferBlitDelta, 0, MEM_RELEASE);
@@ -173,6 +216,47 @@ char* GroovyMister::getPBufferAudio(void)
 	return m_pBufferAudio;
 }
 
+bool GroovyMister::CanWriteBlitBuffer(uint8_t field)
+{
+	if (field > 1)
+		return false;
+#ifdef _WIN32
+	if (USE_RIO && m_rioFunctionsReady)
+	{
+		DrainRioSendCompletions();
+		if (m_rioFailed)
+		{
+			++m_droppedVideoBatches;
+			return false;
+		}
+		bool available = false;
+		if (m_lz4Frames)
+			available = m_outstandingBlitSends[0] == 0 && m_outstandingBlitSends[1] == 0;
+		else
+			available = m_outstandingBlitSends[field] == 0;
+		if (!available)
+			++m_droppedVideoBatches;
+		return available;
+	}
+#endif
+	return true;
+}
+
+bool GroovyMister::CanWriteAudioBuffer(void)
+{
+#ifdef _WIN32
+	if (USE_RIO && m_rioFunctionsReady)
+	{
+		DrainRioSendCompletions();
+		const bool available = !m_rioFailed && m_outstandingAudioSends == 0;
+		if (!available)
+			++m_droppedAudioBatches;
+		return available;
+	}
+#endif
+	return true;
+}
+
 void GroovyMister::CmdClose(void)
 {
 	if (m_isConnected)
@@ -180,25 +264,106 @@ void GroovyMister::CmdClose(void)
 		m_bufferSend[0] = CMD_CLOSE;
 		Send(&m_bufferSend[0], 1);
 	}
+	m_isConnected = 0;
+	m_haveFpgaStatus = false;
 #ifdef _WIN32
 	if (USE_RIO)
 	{
-		m_rio.RIOCloseCompletionQueue(m_sendQueue);
-		m_rio.RIOCloseCompletionQueue(m_receiveQueue);
-		m_rio.RIODeregisterBuffer(m_sendRioBufferId);
-		m_rio.RIODeregisterBuffer(m_sendRioBufferAudioId);
-		for (int i=0;i<2;i++)
+		DrainRioSendCompletions();
+		if (m_sockFD != INVALID_SOCKET)
 		{
-			m_rio.RIODeregisterBuffer(m_sendRioBufferBlitId[i]);
+			::closesocket(m_sockFD);
+			m_sockFD = INVALID_SOCKET;
 		}
 
+		if (m_rioFunctionsReady)
+		{
+			const ULONGLONG deadline = GetTickCount64() + 250;
+			while ((m_outstandingRioSends != 0 || m_outstandingRioReceives != 0) &&
+				GetTickCount64() < deadline)
+			{
+				DrainRioSendCompletions();
+				DrainRioReceiveCompletions();
+				if (m_outstandingRioSends != 0 || m_outstandingRioReceives != 0)
+					Sleep(1);
+			}
+
+			if (m_sendQueue != RIO_INVALID_CQ)
+			{
+				m_rio.RIOCloseCompletionQueue(m_sendQueue);
+				m_sendQueue = RIO_INVALID_CQ;
+			}
+			if (m_receiveQueue != RIO_INVALID_CQ)
+			{
+				m_rio.RIOCloseCompletionQueue(m_receiveQueue);
+				m_receiveQueue = RIO_INVALID_CQ;
+			}
+			m_requestQueue = RIO_INVALID_RQ;
+
+			if (m_sendRioBufferId != RIO_INVALID_BUFFERID)
+				m_rio.RIODeregisterBuffer(m_sendRioBufferId);
+			if (m_receiveRioBufferId != RIO_INVALID_BUFFERID)
+				m_rio.RIODeregisterBuffer(m_receiveRioBufferId);
+			if (m_sendRioBufferAudioId != RIO_INVALID_BUFFERID)
+				m_rio.RIODeregisterBuffer(m_sendRioBufferAudioId);
+			for (int field = 0; field < 2; ++field)
+			{
+				if (m_sendRioBufferBlitId[field] != RIO_INVALID_BUFFERID)
+					m_rio.RIODeregisterBuffer(m_sendRioBufferBlitId[field]);
+			}
+		}
+
+		m_sendRioBufferId = RIO_INVALID_BUFFERID;
+		m_receiveRioBufferId = RIO_INVALID_BUFFERID;
+		m_sendRioBufferAudioId = RIO_INVALID_BUFFERID;
+		delete[] m_pBufsAudio;
+		m_pBufsAudio = nullptr;
+		for (int field = 0; field < 2; ++field)
+		{
+			m_sendRioBufferBlitId[field] = RIO_INVALID_BUFFERID;
+			delete[] m_pBufsBlit[field];
+			m_pBufsBlit[field] = nullptr;
+			m_outstandingBlitSends[field] = 0;
+		}
+		memset(m_commandSlotOutstanding, 0, sizeof(m_commandSlotOutstanding));
+		m_outstandingRioSends = 0;
+		m_outstandingRioReceives = 0;
+		m_outstandingAudioSends = 0;
+		m_receiveNotificationArmed = false;
+		m_rioFunctionsReady = false;
+		m_rioFailed = false;
 	}
-	::closesocket(m_sockFD);
-	::closesocket(m_sockInputsFD);
-	::WSACleanup();
+	else if (m_sockFD != INVALID_SOCKET)
+	{
+		::closesocket(m_sockFD);
+		m_sockFD = INVALID_SOCKET;
+	}
+	if (m_sockInputsFD != INVALID_SOCKET)
+	{
+		::closesocket(m_sockInputsFD);
+		m_sockInputsFD = INVALID_SOCKET;
+	}
+	if (m_hIOCP != NULL)
+	{
+		CloseHandle(m_hIOCP);
+		m_hIOCP = NULL;
+	}
+	if (m_wsaStarted)
+	{
+		::WSACleanup();
+		m_wsaStarted = false;
+	}
 #else
-	close(m_sockFD);
-	close(m_sockInputsFD);
+	if (m_sockFD >= 0)
+	{
+		close(m_sockFD);
+		m_sockFD = -1;
+	}
+	if (m_sockInputsFD >= 0)
+	{
+		close(m_sockInputsFD);
+		m_sockInputsFD = -1;
+	}
 #endif
 }
 
@@ -219,6 +384,13 @@ groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
 	diagnostics.frameTime = m_frameTime;
 	diagnostics.streamTime = m_streamTime;
 	diagnostics.emulationTime = m_emulationTime;
+	diagnostics.outstandingSends = 0;
+#ifdef _WIN32
+	diagnostics.outstandingSends = m_outstandingRioSends;
+#endif
+	diagnostics.droppedVideoBatches = m_droppedVideoBatches;
+	diagnostics.droppedAudioBatches = m_droppedAudioBatches;
+	diagnostics.transportErrors = m_transportErrors;
 	diagnostics.connected = m_isConnected;
 	diagnostics.haveFpgaStatus = m_haveFpgaStatus ? 1 : 0;
 	return diagnostics;
@@ -226,7 +398,12 @@ groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
 
 int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Frames, uint32_t soundRate, uint8_t soundChan, uint8_t rgbMode, uint16_t mtu)
 {
+	CmdClose();
 	m_isConnected = 0;
+	m_haveFpgaStatus = false;
+	m_droppedVideoBatches = 0;
+	m_droppedAudioBatches = 0;
+	m_transportErrors = 0;
 	m_mtu = (!mtu) ? BUFFER_MTU : mtu - MTU_HEADER;
 
 	// Set server
@@ -237,7 +414,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 	// Set socket
 #ifdef _WIN32
 	WSADATA wsd;
-	uint16_t rc;
+	int rc;
 
 	rc = ::WSAStartup(MAKEWORD(2, 2), &wsd);
 	if (rc != 0)
@@ -245,6 +422,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		LOG(0, "[MiSTer] Unable to load Winsock: %d\n", rc);
 		return -1;
 	}
+	m_wsaStarted = true;
 
 	m_sockFD = INVALID_SOCKET;
 
@@ -255,6 +433,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		if (m_sockFD == INVALID_SOCKET)
 		{
 			LOG(0,"[MiSTer] Could not create socket : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 
@@ -263,6 +442,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		if (rc != 0)
 		{
 		        LOG(0,"[MiSTer] Could not create IP_DONTFRAGMENT : %lu", ::GetLastError());
+		        CmdClose();
 		        return -1;
 		}
 
@@ -272,46 +452,55 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		if ( 0 != WSAIoctl(m_sockFD, SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER, &functionTableId, sizeof(GUID), (void**)&m_rio, sizeof(m_rio), &dwBytes, NULL, NULL) )
 		{
 			LOG(0,"[MiSTer] Could not create WSAIoctl : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
+		m_rioFunctionsReady = true;
 
 		m_hIOCP = ::CreateIoCompletionPort(INVALID_HANDLE_VALUE, 0, 0, 0) ;
 		if (NULL == m_hIOCP)
 		{
 			LOG(0,"[MiSTer] Could not create m_hIOCP IoCompletionPort : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 
-		OVERLAPPED overlapped;
-			ZeroMemory(&overlapped, sizeof(overlapped));
+		ZeroMemory(&m_receiveOverlapped, sizeof(m_receiveOverlapped));
 
 		RIO_NOTIFICATION_COMPLETION completionType ;
 
 		completionType.Type = RIO_IOCP_COMPLETION;
 		completionType.Iocp.IocpHandle = m_hIOCP;
 		completionType.Iocp.CompletionKey = (void*)1;
-		completionType.Iocp.Overlapped = &overlapped;
+		completionType.Iocp.Overlapped = &m_receiveOverlapped;
 
 		LOG(0,"[MiSTer] Register Buffers %s...\n","");
-		m_sendRioBufferId = m_rio.RIORegisterBuffer(m_bufferSend, 26);
+		m_sendRioBufferId = m_rio.RIORegisterBuffer(
+			reinterpret_cast<char*>(m_rioCommandBuffers), sizeof(m_rioCommandBuffers));
 		if (m_sendRioBufferId == RIO_INVALID_BUFFERID)
 		{
 			LOG(0,"[MiSTer] RIORegisterBuffer m_BufferSend Error: %lu\n", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
-		m_sendRioBuffer.BufferId = m_sendRioBufferId;
-		m_sendRioBuffer.Offset = 0;
-		m_sendRioBuffer.Length = 26;
+		for (DWORD slot = 0; slot < RIO_COMMAND_SLOTS; ++slot)
+		{
+			m_sendRioBuffers[slot].BufferId = m_sendRioBufferId;
+			m_sendRioBuffers[slot].Offset = slot * sizeof(m_rioCommandBuffers[slot]);
+			m_sendRioBuffers[slot].Length = sizeof(m_rioCommandBuffers[slot]);
+			m_commandSlotOutstanding[slot] = false;
+		}
 
-		m_receiveRioBufferId = m_rio.RIORegisterBuffer(m_bufferReceive, 17);
+		m_receiveRioBufferId = m_rio.RIORegisterBuffer(m_bufferReceive, sizeof(m_bufferReceive));
 		if (m_receiveRioBufferId == RIO_INVALID_BUFFERID)
 		{
 			LOG(0,"[MiSTer] RIORegisterBuffer m_BufferReceive Error: %lu\n", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 		m_receiveRioBuffer.BufferId = m_receiveRioBufferId;
 		m_receiveRioBuffer.Offset = 0;
-		m_receiveRioBuffer.Length = 17;
+		m_receiveRioBuffer.Length = sizeof(m_bufferReceive);
 		
 		DWORD offset = 0;
 		for (int field = 0; field < 2; field++)
@@ -327,6 +516,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 			if (m_sendRioBufferBlitId[field] == RIO_INVALID_BUFFERID)
 			{
 				LOG(0,"[MiSTer] RIORegisterBuffer pBufferBlit[%d] Error: %lu\n", field, ::GetLastError());
+				CmdClose();
 				return -1;
 			}
 	
@@ -347,6 +537,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		if (m_sendRioBufferAudioId == RIO_INVALID_BUFFERID)
 		{
 			LOG(0,"[MiSTer] RIORegisterBuffer pBufferAudio Error: %lu\n", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 		offset = 0;
@@ -363,24 +554,28 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		}
 
 		LOG(0,"[MiSTer] Create queues %s...\n","");
-		m_sendQueue = m_rio.RIOCreateCompletionQueue(BUFFER_SLICES, &completionType);
+		m_sendQueue = m_rio.RIOCreateCompletionQueue(RIO_SEND_QUEUE_SIZE, &completionType);
 		if (m_sendQueue == RIO_INVALID_CQ)
 		{
 			LOG(0,"[MiSTer]Could not create m_sendQueue : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 
-		m_receiveQueue = m_rio.RIOCreateCompletionQueue(BUFFER_SLICES, &completionType);
+		m_receiveQueue = m_rio.RIOCreateCompletionQueue(8, &completionType);
 		if (m_receiveQueue == RIO_INVALID_CQ)
 		{
 			LOG(0,"[MiSTer]Could not create m_receiveQueue : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 
-		m_requestQueue = m_rio.RIOCreateRequestQueue(m_sockFD, BUFFER_SLICES, 1, BUFFER_SLICES, 1, m_receiveQueue, m_sendQueue, NULL) ;
+		m_requestQueue = m_rio.RIOCreateRequestQueue(
+			m_sockFD, 8, 1, RIO_SEND_QUEUE_SIZE, 1, m_receiveQueue, m_sendQueue, NULL);
 		if (m_requestQueue == RIO_INVALID_RQ)
 		{
 			LOG(0,"[MiSTer]Could not create m_requestQueue : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
 
@@ -388,10 +583,9 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 		if (SOCKET_ERROR == ::connect(m_sockFD, reinterpret_cast<sockaddr *>(&m_serverAddr), sizeof(m_serverAddr)))
 		{
 			LOG(0,"[MiSTer] Could not connect : %lu", ::GetLastError());
+			CmdClose();
 			return -1;
 		}
-
-		m_rio.RIONotify(m_receiveQueue);
 	}
 	else
 	{
@@ -459,7 +653,7 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 
 	LOG(0,"[MiSTer] Sending CMD_INIT...lz4 %d sound_rate %d sound_chan %d rgb_mode %d mtu %d\n", lz4Frames, soundRate, soundChan, rgbMode, mtu);
 
-	m_lz4Frames = lz4Frames;
+	m_lz4Frames = static_cast<uint8_t>(lz4Frames);
 	m_soundChan = soundChan;
 	m_rgbMode = rgbMode;
 	m_haveFpgaStatus = false;
@@ -470,19 +664,32 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 	m_bufferSend[3] = soundChan;
 	m_bufferSend[4] = rgbMode;
 
-	Send(&m_bufferSend[0], 5);
-
 #ifdef _WIN32
 	if (USE_RIO)
 	{
-		m_rio.RIOReceive(m_requestQueue, &m_receiveRioBuffer, 1, 0, &m_receiveRioBuffer);
+		if (!QueueRioReceive() || !ArmRioReceiveNotification())
+		{
+			CmdClose();
+			return -1;
+		}
 	}
 #endif
+	if (!Send(&m_bufferSend[0], 5))
+	{
+		CmdClose();
+		return -1;
+	}
 
-	uint32_t ackTime = getACK(60);
+	uint32_t ackTime = 0;
+	for (int attempt = 0; attempt < INIT_ACK_ATTEMPTS && !ackTime; ++attempt)
+	{
+		if (attempt > 0 && !Send(&m_bufferSend[0], 5))
+			break;
+		ackTime = getACK(INIT_ACK_TIMEOUT_MS);
+	}
 	if (!ackTime)
 	{
-		LOG(0,"[MiSTer] ACK failed with %d ms\n", 60);
+		LOG(0,"[MiSTer] ACK failed after %d attempts of %d ms\n", INIT_ACK_ATTEMPTS, INIT_ACK_TIMEOUT_MS);
 		CmdClose();
 		return -1;
 	}
@@ -527,7 +734,7 @@ void GroovyMister::CmdSwitchres(double pClock, uint16_t hActive, uint16_t hBegin
 		m_RGBSize = m_RGBSize >> 1;
 	}
 
-	m_widthTime = 10 * round((double) hTotal * (1 / pClock)); //in nanosec, time to raster 1 line
+	m_widthTime = static_cast<uint32_t>(10 * round((double) hTotal * (1 / pClock))); //in 100 ns units, time to raster 1 line
 	m_frameTime = (m_widthTime * vTotal) >> interlace_modeline;
 	
 	m_interlace = interlace_modeline;
@@ -554,6 +761,8 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 {
 	if (!m_isConnected)
 	  return;
+	if (!CanWriteBlitBuffer(field))
+		return;
 	  
 	m_frame = frame;
 	uint16_t vSync = vCountSync;
@@ -567,7 +776,9 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 		else
 		{
 			uint32_t timeCalc = (m_network_ping + margin + m_emulationTime >= m_frameTime) ? 0 : m_network_ping + margin + m_emulationTime - m_streamTime;
-			vSync = (timeCalc == 0) ? 1 : m_vTotal - round(m_vTotal * timeCalc) / m_frameTime;
+			vSync = (timeCalc == 0)
+				? 1
+				: static_cast<uint16_t>(m_vTotal - round(m_vTotal * timeCalc) / m_frameTime);
 		}
 	}
 
@@ -633,6 +844,7 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 
 	mistercast::protocol::EncodeBlitHeader(
 		reinterpret_cast<uint8_t*>(m_bufferSend), sizeof(m_bufferSend), frame, field, vSync);
+	int headerSize = 0;
 	if (cSize > 0)
 	{
 		if (ratio_delta < 0.95)
@@ -640,13 +852,13 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 			memcpy(&m_bufferSend[8], &cSizeDelta, sizeof(cSizeDelta));
 			m_bufferSend[12] = 0x01; //frame_delta
 			bytesToSend = cSizeDelta;
-			Send(&m_bufferSend[0], 13);
+			headerSize = 13;
 		}
 		else
 		{
 			memcpy(&m_bufferSend[8], &cSize, sizeof(cSize));
 			bytesToSend = cSize;
-			Send(&m_bufferSend[0], 12);
+			headerSize = 12;
 		}
 	}
 	else
@@ -654,15 +866,36 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 		if (m_delta_enabled[field] && matchDeltaBytes == m_RGBSize)
 		{
 			m_bufferSend[8] = 0x01; //frame_dup
-			Send(&m_bufferSend[0], 9);
-			return;
+			headerSize = 9;
 		}
 		else
 		{
 			bytesToSend = m_RGBSize;
-			Send(&m_bufferSend[0], 8);
+			headerSize = 8;
 		}
 	}
+
+#ifdef _WIN32
+	if (USE_RIO)
+	{
+		const ULONG payloadRequests = bytesToSend == 0
+			? 0
+			: static_cast<ULONG>((bytesToSend + m_mtu - 1) / m_mtu);
+		if (!CanQueueRioSends(1 + payloadRequests))
+		{
+			++m_droppedVideoBatches;
+			return;
+		}
+	}
+#endif
+
+	if (!Send(&m_bufferSend[0], headerSize))
+	{
+		++m_droppedVideoBatches;
+		return;
+	}
+	if (bytesToSend == 0)
+		return;
 	
 	if (m_doCongestionControl)
 	{
@@ -678,7 +911,11 @@ void GroovyMister::CmdBlit(uint32_t frame, uint8_t field, uint16_t vCountSync, u
 	
 	setTimeStart();
 	uint8_t buffer_blit = (cSize > 0) ? (ratio_delta < 0.95) ? 1 : 0 : field;
-	SendStream(0, buffer_blit, bytesToSend, (ratio_delta < 0.95) ? cSizeDelta : cSize);
+	if (!SendStream(0, buffer_blit, bytesToSend, (ratio_delta < 0.95) ? cSizeDelta : cSize))
+	{
+		++m_droppedVideoBatches;
+		return;
+	}
 	setTimeEnd();
 	m_streamTime = DiffTime();
 	m_tickCongestion = m_tickEnd;
@@ -693,12 +930,32 @@ void GroovyMister::CmdAudio(uint16_t soundSize)
 	{
 		return;
 	}
+	if (!CanWriteAudioBuffer())
+		return;
+#ifdef _WIN32
+	if (USE_RIO)
+	{
+		const ULONG payloadRequests = soundSize == 0
+			? 0
+			: static_cast<ULONG>((soundSize + m_mtu - 1) / m_mtu);
+		if (!CanQueueRioSends(1 + payloadRequests))
+		{
+			++m_droppedAudioBatches;
+			return;
+		}
+	}
+#endif
 
 	m_bufferSend[0] = CMD_AUDIO;
 	memcpy(&m_bufferSend[1], &soundSize, sizeof(soundSize));
-	Send(&m_bufferSend[0], 3);
+	if (!Send(&m_bufferSend[0], 3))
+	{
+		++m_droppedAudioBatches;
+		return;
+	}
 
-	SendStream(1, 0, soundSize, 0);
+	if (!SendStream(1, 0, soundSize, 0))
+		++m_droppedAudioBatches;
 }
 
 uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
@@ -711,20 +968,28 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 #ifdef _WIN32
 	if (USE_RIO)
 	{
-		static const DWORD RIO_MAX_RESULTS = 1000;
+		DrainRioSendCompletions();
+		if (m_rioFailed || !m_rioFunctionsReady || m_hIOCP == NULL)
+			return 0;
+
+		static const DWORD RIO_MAX_RESULTS = 8;
 		DWORD numberOfBytes = 0;
 		ULONG_PTR completionKey = 0;
 		OVERLAPPED* pOverlapped = 0;
 		if (::GetQueuedCompletionStatus(m_hIOCP, &numberOfBytes, &completionKey, &pOverlapped, dwMilliseconds))
 		{
+			m_receiveNotificationArmed = false;
 			RIORESULT results[RIO_MAX_RESULTS];
 			ULONG numResults = m_rio.RIODequeueCompletion(m_receiveQueue, results, RIO_MAX_RESULTS);
-			ULONG idx;
-			while (numResults)
+			while (numResults != 0 && numResults != RIO_CORRUPT_CQ)
 			{
-				idx=0;
-				do
+				m_outstandingRioReceives = numResults >= m_outstandingRioReceives
+					? 0
+					: m_outstandingRioReceives - numResults;
+				for (ULONG idx = 0; idx < numResults; ++idx)
 				{
+					if (results[idx].Status != ERROR_SUCCESS)
+						continue;
 					if (results[idx].BytesTransferred == mistercast::protocol::FpgaStatusSize) //blit ACK
 					{
 						if (dwMilliseconds > 0)
@@ -751,13 +1016,23 @@ uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
 						}
 						memcpy(&m_core_version, &m_bufferReceive[0], 1);
 					}
-					idx++;
-				} while (idx < numResults);
+				}
 				numResults = m_rio.RIODequeueCompletion(m_receiveQueue, results, RIO_MAX_RESULTS);
 			}
-			m_rio.RIOReceive(m_requestQueue, &m_receiveRioBuffer, 1, 0, &m_receiveRioBuffer);
+			if (numResults == RIO_CORRUPT_CQ)
+			{
+				RecordRioError("RIO receive completion queue");
+				return getACKresult;
+			}
+			if (!QueueRioReceive())
+				return getACKresult;
+			ArmRioReceiveNotification();
 		}
-		m_rio.RIONotify(m_receiveQueue);
+		else if (GetLastError() != WAIT_TIMEOUT)
+		{
+			m_receiveNotificationArmed = false;
+			RecordRioError("GetQueuedCompletionStatus");
+		}
 		return getACKresult;
 	}
 #endif
@@ -854,7 +1129,7 @@ void GroovyMister::BindInputs(const char* misterHost, uint16_t misterPort)
 	// Set socket
 #ifdef _WIN32
 	WSADATA wsd;
-	uint16_t rc;
+	int rc;
 	rc = ::WSAStartup(MAKEWORD(2, 2), &wsd);
 	if (rc != 0)
 	{
@@ -988,66 +1263,245 @@ char *GroovyMister::AllocateBufferSpace(const DWORD bufSize, const DWORD bufCoun
 }
 
 
-void GroovyMister::Send(void *cmd, int cmdSize)
-{
 #ifdef _WIN32
-if (USE_RIO)
+void GroovyMister::RecordRioError(const char* operation)
 {
-	m_sendRioBuffer.Length = cmdSize;
-	m_rio.RIOSend(m_requestQueue, &m_sendRioBuffer, 1, RIO_MSG_DONT_NOTIFY, &m_sendRioBuffer);
-	return;
-}
-#endif
-	sendto(m_sockFD, (char *) cmd, cmdSize, 0, (struct sockaddr *)&m_serverAddr, sizeof(m_serverAddr));
+	++m_transportErrors;
+	if (!m_rioFailed)
+		LOG(0, "[MiSTer] %s failed (Winsock error %d)\n", operation, WSAGetLastError());
+	m_rioFailed = true;
+	m_isConnected = 0;
 }
 
-void GroovyMister::SendStream(uint8_t whichBuffer, uint8_t field, uint32_t bytesToSend, uint32_t cSize)
-{	
+void GroovyMister::ReleaseRioSendContext(void* requestContext)
+{
+	for (ULONG slot = 0; slot < RIO_COMMAND_SLOTS; ++slot)
+	{
+		if (requestContext == &m_sendRioBuffers[slot])
+		{
+			m_commandSlotOutstanding[slot] = false;
+			return;
+		}
+	}
+
+	const uintptr_t context = reinterpret_cast<uintptr_t>(requestContext);
+	for (int field = 0; field < 2; ++field)
+	{
+		if (m_pBufsBlit[field] == nullptr)
+			continue;
+		const uintptr_t begin = reinterpret_cast<uintptr_t>(m_pBufsBlit[field]);
+		const uintptr_t end = begin + sizeof(RIO_BUF) * BUFFER_SLICES;
+		if (context >= begin && context < end)
+		{
+			if (m_outstandingBlitSends[field] > 0)
+				--m_outstandingBlitSends[field];
+			return;
+		}
+	}
+
+	if (m_pBufsAudio != nullptr)
+	{
+		const uintptr_t begin = reinterpret_cast<uintptr_t>(m_pBufsAudio);
+		const uintptr_t end = begin + sizeof(RIO_BUF) * BUFFER_SLICES;
+		if (context >= begin && context < end && m_outstandingAudioSends > 0)
+			--m_outstandingAudioSends;
+	}
+}
+
+void GroovyMister::DrainRioSendCompletions(void)
+{
+	if (!m_rioFunctionsReady || m_sendQueue == RIO_INVALID_CQ || m_outstandingRioSends == 0)
+		return;
+
+	RIORESULT results[128];
+	for (;;)
+	{
+		const ULONG count = m_rio.RIODequeueCompletion(m_sendQueue, results, ARRAYSIZE(results));
+		if (count == RIO_CORRUPT_CQ)
+		{
+			RecordRioError("RIO send completion queue");
+			return;
+		}
+		if (count == 0)
+			return;
+
+		for (ULONG index = 0; index < count; ++index)
+		{
+			ReleaseRioSendContext(reinterpret_cast<void*>(
+				static_cast<uintptr_t>(results[index].RequestContext)));
+			if (m_outstandingRioSends > 0)
+				--m_outstandingRioSends;
+			if (results[index].Status != ERROR_SUCCESS && m_sockFD != INVALID_SOCKET)
+				RecordRioError("RIO send completion");
+		}
+		if (count < ARRAYSIZE(results))
+			return;
+	}
+}
+
+void GroovyMister::DrainRioReceiveCompletions(void)
+{
+	if (!m_rioFunctionsReady || m_receiveQueue == RIO_INVALID_CQ || m_outstandingRioReceives == 0)
+		return;
+
+	RIORESULT results[8];
+	for (;;)
+	{
+		const ULONG count = m_rio.RIODequeueCompletion(m_receiveQueue, results, ARRAYSIZE(results));
+		if (count == RIO_CORRUPT_CQ || count == 0)
+			return;
+		m_outstandingRioReceives = count >= m_outstandingRioReceives
+			? 0
+			: m_outstandingRioReceives - count;
+		if (count < ARRAYSIZE(results))
+			return;
+	}
+}
+
+bool GroovyMister::CanQueueRioSends(ULONG requestCount)
+{
+	DrainRioSendCompletions();
+	return !m_rioFailed && m_rioFunctionsReady && m_requestQueue != RIO_INVALID_RQ &&
+		m_outstandingRioSends <= RIO_SEND_QUEUE_SIZE &&
+		requestCount <= RIO_SEND_QUEUE_SIZE - m_outstandingRioSends;
+}
+
+bool GroovyMister::QueueRioReceive(void)
+{
+	if (m_rioFailed || !m_rioFunctionsReady || m_requestQueue == RIO_INVALID_RQ ||
+		m_outstandingRioReceives != 0)
+	{
+		return m_outstandingRioReceives != 0;
+	}
+	if (!m_rio.RIOReceive(m_requestQueue, &m_receiveRioBuffer, 1, 0, &m_receiveRioBuffer))
+	{
+		RecordRioError("RIOReceive");
+		return false;
+	}
+	++m_outstandingRioReceives;
+	return true;
+}
+
+bool GroovyMister::ArmRioReceiveNotification(void)
+{
+	if (m_receiveNotificationArmed)
+		return true;
+	if (m_rioFailed || !m_rioFunctionsReady || m_receiveQueue == RIO_INVALID_CQ)
+		return false;
+	ZeroMemory(&m_receiveOverlapped, sizeof(m_receiveOverlapped));
+	if (m_rio.RIONotify(m_receiveQueue) != ERROR_SUCCESS)
+	{
+		RecordRioError("RIONotify");
+		return false;
+	}
+	m_receiveNotificationArmed = true;
+	return true;
+}
+#endif
+
+bool GroovyMister::Send(void *cmd, int cmdSize)
+{
+#ifdef _WIN32
+	if (USE_RIO)
+	{
+		if (cmd == nullptr || cmdSize <= 0 || cmdSize > static_cast<int>(sizeof(m_rioCommandBuffers[0])) ||
+			!CanQueueRioSends(1))
+		{
+			return false;
+		}
+
+		for (ULONG slot = 0; slot < RIO_COMMAND_SLOTS; ++slot)
+		{
+			if (m_commandSlotOutstanding[slot])
+				continue;
+			memcpy(m_rioCommandBuffers[slot], cmd, cmdSize);
+			m_sendRioBuffers[slot].Length = cmdSize;
+			if (!m_rio.RIOSend(
+				m_requestQueue, &m_sendRioBuffers[slot], 1, RIO_MSG_DONT_NOTIFY, &m_sendRioBuffers[slot]))
+			{
+				RecordRioError("RIOSend command");
+				return false;
+			}
+			m_commandSlotOutstanding[slot] = true;
+			++m_outstandingRioSends;
+			return true;
+		}
+		return false;
+	}
+#endif
+	return sendto(m_sockFD, static_cast<char*>(cmd), cmdSize, 0,
+		reinterpret_cast<struct sockaddr*>(&m_serverAddr), sizeof(m_serverAddr)) == cmdSize;
+}
+
+bool GroovyMister::SendStream(uint8_t whichBuffer, uint8_t field, uint32_t bytesToSend, uint32_t cSize)
+{
 	uint32_t bytesSended = 0;
 #ifdef _WIN32
-if (USE_RIO)
-{
-	DWORD flags = RIO_MSG_DONT_NOTIFY | RIO_MSG_DEFER;
-	int i=0;
-	while (bytesSended < bytesToSend)
+	if (USE_RIO)
 	{
-		if (whichBuffer == 0)
+		if (bytesToSend == 0)
+			return true;
+		const ULONG requestCount = static_cast<ULONG>((bytesToSend + m_mtu - 1) / m_mtu);
+		if (requestCount > BUFFER_SLICES || !CanQueueRioSends(requestCount) ||
+			(whichBuffer == 0 && (field > 1 || m_outstandingBlitSends[field] != 0)) ||
+			(whichBuffer != 0 && m_outstandingAudioSends != 0))
 		{
-			m_pBufsBlit[field][i].Length = (bytesToSend - bytesSended >= m_mtu) ? m_mtu : bytesToSend - bytesSended;
-			m_rio.RIOSend(m_requestQueue, &m_pBufsBlit[field][i], 1, flags, &m_pBufsBlit[field][i]);
+			return false;
 		}
-		else
+
+		DWORD flags = RIO_MSG_DONT_NOTIFY | RIO_MSG_DEFER;
+		ULONG queued = 0;
+		while (bytesSended < bytesToSend)
 		{
-			m_pBufsAudio[i].Length = (bytesToSend - bytesSended >= m_mtu) ? m_mtu : bytesToSend - bytesSended;
-			m_rio.RIOSend(m_requestQueue, &m_pBufsAudio[i], 1, flags, &m_pBufsAudio[i]);
+			const ULONG chunkSize = (bytesToSend - bytesSended >= m_mtu)
+				? m_mtu
+				: bytesToSend - bytesSended;
+			RIO_BUF* buffer = whichBuffer == 0
+				? &m_pBufsBlit[field][queued]
+				: &m_pBufsAudio[queued];
+			buffer->Length = chunkSize;
+			if (!m_rio.RIOSend(m_requestQueue, buffer, 1, flags, buffer))
+			{
+				if (queued != 0)
+					m_rio.RIOSend(m_requestQueue, NULL, 0, RIO_MSG_COMMIT_ONLY, NULL);
+				RecordRioError("RIOSend stream");
+				return false;
+			}
+			++queued;
+			++m_outstandingRioSends;
+			if (whichBuffer == 0)
+				++m_outstandingBlitSends[field];
+			else
+				++m_outstandingAudioSends;
+			bytesSended += chunkSize;
 		}
-		bytesSended += m_mtu;
-		i++;
+		if (!m_rio.RIOSend(m_requestQueue, NULL, 0, RIO_MSG_COMMIT_ONLY, NULL))
+		{
+			RecordRioError("RIO stream commit");
+			return false;
+		}
+		return true;
 	}
-	m_rio.RIOSend(m_requestQueue, NULL, 0, RIO_MSG_COMMIT_ONLY, NULL);
-	return;
-}
 #endif
 	while (bytesSended < bytesToSend)
 	{
-		uint32_t chunkSize = (bytesToSend - bytesSended >= m_mtu) ? m_mtu : bytesToSend - bytesSended;
+		const uint32_t chunkSize = (bytesToSend - bytesSended >= m_mtu) ? m_mtu : bytesToSend - bytesSended;
+		bool sent = false;
 		if (whichBuffer == 0)
 		{
-			if (cSize > 0)
-			{
-				Send(&m_pBufferLZ4[field][bytesSended], chunkSize);
-			}
-			else
-			{
-				Send(&m_pBufferBlit[field][bytesSended], chunkSize);
-			}
+			sent = cSize > 0
+				? Send(&m_pBufferLZ4[field][bytesSended], chunkSize)
+				: Send(&m_pBufferBlit[field][bytesSended], chunkSize);
 		}
 		else
 		{
-			Send(&m_pBufferAudio[bytesSended], chunkSize);
+			sent = Send(&m_pBufferAudio[bytesSended], chunkSize);
 		}
-		bytesSended += m_mtu;
+		if (!sent)
+			return false;
+		bytesSended += chunkSize;
 	}
+	return true;
 }
 
 inline void GroovyMister::setTimeStart(void)

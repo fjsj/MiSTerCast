@@ -25,6 +25,11 @@
 #define MTU_HEADER 28
 #define BUFFER_MTU 1500 - MTU_HEADER
 
+#ifdef _WIN32
+#define RIO_COMMAND_SLOTS 64
+#define RIO_SEND_QUEUE_SIZE (BUFFER_SLICES * 2 + RIO_COMMAND_SLOTS)
+#endif
+
 //joystick map
 #define GM_JOY_RIGHT (1 << 0)
 #define GM_JOY_LEFT  (1 << 1)
@@ -65,6 +70,10 @@ typedef struct groovyMisterDiagnostics {
 	uint32_t frameTime;
 	uint32_t streamTime;
 	uint32_t emulationTime;
+	uint32_t outstandingSends;
+	uint32_t droppedVideoBatches;
+	uint32_t droppedAudioBatches;
+	uint32_t transportErrors;
 	uint8_t connected;
 	uint8_t haveFpgaStatus;
 } groovyMisterDiagnostics;
@@ -110,6 +119,8 @@ class GroovyMister
 	char* getPBufferBlit(uint8_t field); // This buffer are registered and aligned for sending rgb. Populate it before CmdBlit
 	char* getPBufferBlitDelta(void); // This buffer are registered and aligned for sending rgb. Populate it before CmdBlit with delta difference between actual frame and last
 	char* getPBufferAudio(void); // This buffer are registered and aligned for sending audio. Populate it before CmdAudio
+	bool CanWriteBlitBuffer(uint8_t field);
+	bool CanWriteAudioBuffer(void);
 	
 	// Close connection
 	void CmdClose(void);
@@ -146,8 +157,11 @@ class GroovyMister
 	RIO_CQ m_receiveQueue;
 	RIO_RQ m_requestQueue;
 	HANDLE m_hIOCP;
+	OVERLAPPED m_receiveOverlapped;
 	RIO_BUFFERID m_sendRioBufferId;
-	RIO_BUF m_sendRioBuffer;
+	RIO_BUF m_sendRioBuffers[RIO_COMMAND_SLOTS];
+	char m_rioCommandBuffers[RIO_COMMAND_SLOTS][26];
+	bool m_commandSlotOutstanding[RIO_COMMAND_SLOTS];
 	RIO_BUFFERID m_receiveRioBufferId;
 	RIO_BUF m_receiveRioBuffer;
 	RIO_BUFFERID m_sendRioBufferBlitId[2];	
@@ -156,6 +170,14 @@ class GroovyMister
 	RIO_BUF m_sendRioBufferAudio;
 	RIO_BUF *m_pBufsAudio;
 	SOCKET m_sockInputsFD;
+	bool m_wsaStarted;
+	bool m_rioFunctionsReady;
+	bool m_receiveNotificationArmed;
+	bool m_rioFailed;
+	ULONG m_outstandingRioSends;
+	ULONG m_outstandingRioReceives;
+	ULONG m_outstandingBlitSends[2];
+	ULONG m_outstandingAudioSends;
 
 	LARGE_INTEGER m_tickStart;
 	LARGE_INTEGER m_tickEnd;
@@ -198,10 +220,22 @@ class GroovyMister
 	uint8_t m_delta_enabled[2];
 	uint8_t m_isConnected;
 	bool m_haveFpgaStatus;
+	uint32_t m_droppedVideoBatches;
+	uint32_t m_droppedAudioBatches;
+	uint32_t m_transportErrors;
 
 	char *AllocateBufferSpace(const DWORD bufSize, const DWORD bufCount, DWORD& totalBufferSize, DWORD& totalBufferCount);
-	void Send(void *cmd, int cmdSize);
-	void SendStream(uint8_t whichBuffer, uint8_t field, uint32_t bytesToSend, uint32_t cSize);
+	bool Send(void *cmd, int cmdSize);
+	bool SendStream(uint8_t whichBuffer, uint8_t field, uint32_t bytesToSend, uint32_t cSize);
+#ifdef _WIN32
+	void DrainRioSendCompletions(void);
+	void DrainRioReceiveCompletions(void);
+	bool CanQueueRioSends(ULONG requestCount);
+	bool QueueRioReceive(void);
+	bool ArmRioReceiveNotification(void);
+	void RecordRioError(const char* operation);
+	void ReleaseRioSendContext(void* requestContext);
+#endif
 	void setTimeStart(void);
 	void setTimeEnd(void);
 	uint32_t DiffTime(void);

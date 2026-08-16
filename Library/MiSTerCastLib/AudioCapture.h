@@ -103,7 +103,7 @@ bool StopAudioCapture()
      return true;
 }
 
-bool TickAudioCapture()
+bool TickAudioCapture(bool writeOutput = true)
 {
     audioCaptureScratch.clear();
     AudioWritePos = 0;
@@ -166,7 +166,7 @@ bool TickAudioCapture()
         EXIT_ON_ERROR(hr, "IAudioCaptureClient GetNextPacketSize failed");
     }
 
-    if (audioBuffer != nullptr && !audioCaptureScratch.empty())
+    if (writeOutput && audioBuffer != nullptr && !audioCaptureScratch.empty())
     {
         AudioWritePos = static_cast<unsigned int>(audioCaptureScratch.size());
         std::memcpy(audioBuffer, audioCaptureScratch.data(), AudioWritePos * sizeof(int16_t));

@@ -19,6 +19,8 @@ MiSTer status packets are decoded explicitly as little-endian protocol data. Sta
 
 Each run writes a timestamped diagnostic log under `%LOCALAPPDATA%\MiSTerCast\Logs`. While streaming, one `[stream]` sample per second records capture and output cadence, maximum transform and send/wait time, commanded frame/field, MiSTer frame/F1 status, field repeats, frame-counter realignments, and protocol readiness flags. The GUI shows only the latest telemetry sample so long sessions do not continually grow the log panel. These diagnostics do not add extra network waits or change field selection.
 
+The Windows Registered I/O sender drains completions without waiting in the render path. If a slow link still owns a registered video or audio buffer, MiSTerCast drops that complete batch instead of reusing the memory or growing an unbounded queue. The `[stream]` line reports `rio_outstanding`, `dropped_video`, `dropped_audio`, and `transport_errors`; sustained drops mean the selected network path cannot keep up. Direct Ethernet remains the recommended remedy.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:
@@ -63,8 +65,8 @@ FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x48
 
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.
-- At least 1-2 frames of latency.
-- If the app crashes, you will need to restart your MiSTer and Groovy_MiSTer.
+- Latency depends on the capture and network path; direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
+- Wi-Fi may drop whole video or audio batches when it cannot keep pace. Use the raw IPv4 address of the direct Ethernet adapter for stable low-latency streaming.
 - Nothing over 720x480i is recommended at the moment due to throughput on MiSTer. This will improve soon.
 - High refresh rate monitors are not supported due to frame times. Please change your monitor to ~60hz.
 

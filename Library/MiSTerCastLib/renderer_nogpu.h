@@ -111,6 +111,7 @@ private:
     uint8_t m_diagnostics_last_field = 0;
     uint8_t m_diagnostics_last_f1 = 0;
     bool m_diagnostics_have_sample = false;
+    bool m_transport_failure_logged = false;
 
     uint64_t time_start = 0;
     uint64_t time_entry = 0;
@@ -194,11 +195,23 @@ void renderer_nogpu::draw()
     if (!m_initialized)
         return;
 
+    const groovyMisterDiagnostics transportState = groovyMister.getDiagnostics();
+    if (!transportState.connected)
+    {
+        if (!m_transport_failure_logged)
+        {
+            LogMessage("The streaming transport stopped after a network error. Stop and restart the stream to retry.", true);
+            m_transport_failure_logged = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        return;
+    }
+
     const uint64_t diagnostics_draw_start = CurrentTicks();
 
     m_frame++;
 
-    if (groovyMister.fpga.frame > m_frame)
+    if (groovyMister.fpga.frame > static_cast<uint32_t>(m_frame))
         m_frame = groovyMister.fpga.frame + 1;
 
     // get current field for interlaced mode
@@ -266,8 +279,9 @@ void renderer_nogpu::draw()
     // Capture and send audio
     if (source_config.audio)
     {
-        TickAudioCapture();
-        if (groovyMister.fpga.audio && AudioWritePos > 0)
+        const bool audioBufferAvailable = groovyMister.CanWriteAudioBuffer();
+        TickAudioCapture(audioBufferAvailable);
+        if (audioBufferAvailable && groovyMister.fpga.audio && AudioWritePos > 0)
             groovyMister.CmdAudio(static_cast<uint16_t>(AudioWritePos * sizeof(int16_t)));
     }
 
@@ -303,8 +317,6 @@ void renderer_nogpu::draw()
 
 bool renderer_nogpu::nogpu_init()
 {
-    int result;
-
     m_compression = 0x01; // lz4 compression
 
     const uint32_t negotiatedAudioRate = source_config.audio ? audioSampleRate.load() : 0;
@@ -540,7 +552,11 @@ void renderer_nogpu::nogpu_log_diagnostics(
         << " stream_ms=" << (transport.streamTime / 10000.0)
         << " emulation_ms=" << (transport.emulationTime / 10000.0)
         << " target_ms=" << (transport.frameTime / 10000.0)
-        << " sync_line=" << m_vsync_scanline;
+        << " sync_line=" << m_vsync_scanline
+        << " rio_outstanding=" << transport.outstandingSends
+        << " dropped_video=" << transport.droppedVideoBatches
+        << " dropped_audio=" << transport.droppedAudioBatches
+        << " transport_errors=" << transport.transportErrors;
     LogMessage(message.str());
 
     m_diagnostics_start = send_end;

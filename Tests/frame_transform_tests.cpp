@@ -94,6 +94,7 @@ void BoundsAndChannelTests()
 int RunAudioProcessingTests();
 int RunGroovyProtocolTests();
 int RunStreamingTimingTests();
+int RunTransportLifecycleTests();
 
 int main()
 {
@@ -103,6 +104,7 @@ int main()
     failures += RunAudioProcessingTests();
     failures += RunGroovyProtocolTests();
     failures += RunStreamingTimingTests();
+    failures += RunTransportLifecycleTests();
 
     if (failures != 0)
     {
