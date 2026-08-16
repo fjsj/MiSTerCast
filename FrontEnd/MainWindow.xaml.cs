@@ -620,7 +620,7 @@ namespace MiSTerCast
 
             if (isInitialized && currentModeLine.pclock > 0 && currentModeLine.hactive > 0 && currentModeLine.vactive > 0)
             {
-                MiSTerCastInterop.SetModeline(
+                if (!MiSTerCastInterop.SetModeline(
                     currentModeLine.pclock,
                     currentModeLine.hactive,
                     currentModeLine.hbegin,
@@ -630,7 +630,10 @@ namespace MiSTerCast
                     currentModeLine.vbegin,
                     currentModeLine.vend,
                     currentModeLine.vtotal,
-                    currentModeLine.interlace);
+                    currentModeLine.interlace))
+                {
+                    return;
+                }
 
                 UpdateCropSize();
                 OnCaptureSourceChanged();

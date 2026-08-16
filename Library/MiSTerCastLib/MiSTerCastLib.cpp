@@ -24,6 +24,9 @@ std::mutex castTaskMutex;
 #include "groovymister.h"
 #include "renderer_nogpu.h"
 
+static_assert(BUFFER_SIZE == mistercast::MaxStreamBufferBytes,
+    "The modeline validator must match the Groovy_MiSTer transport buffer.");
+
 std::atomic_bool capturing_screen = false;
 void capture_screen()
 {
@@ -280,6 +283,14 @@ MISTERCASTLIB_API bool SetModeline(
     bool interlace)
 {
     LogMessage("SetModeline called");
+    if (!mistercast::IsValidStreamModeline(
+        pclock, hactive, hbegin, hend, htotal,
+        vactive, vbegin, vend, vtotal, interlace))
+    {
+        LogMessage("The modeline is invalid or its RGB field exceeds the streaming buffer capacity.", true);
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(selected_modeline_mutex);
         selected_modeline.pclock = pclock;

@@ -71,6 +71,6 @@ Add `--switch-modeline "720x480i NTSC (60Hz)"` to change to another preset halfw
 - High refresh rate monitors are not supported due to frame times. Please change your monitor to ~60hz.
 
 ## Notes
-The current pre-defined modelines are just for testing. You can add your own in modelines.dat.
+The current pre-defined modelines are just for testing. You can add your own in modelines.dat. Invalid timing order, odd-height interlaced modes, and modes whose RGB field exceeds the sender's fixed transport buffer are rejected instead of risking a corrupt frame.
 It's best to use a refresh that matches your PC for better sync.
 Find more modeline examples here: https://www.geocities.ws/podernixie/htpc/modes-en.html

@@ -20,6 +20,7 @@ int RunStreamingTimingTests()
     using mistercast::CounterTicksTo100ns;
     using mistercast::FieldPeriodMilliseconds;
     using mistercast::LinePeriodMilliseconds;
+    using mistercast::IsValidStreamModeline;
     using mistercast::RequestedSyncLine;
 
     Check(CounterTicksTo100ns(10000000, 10000000) == 10000000);
@@ -41,6 +42,13 @@ int RunStreamingTimingTests()
     Check(RequestedSyncLine(525, 0.9, true, false) == 473);
     Check(RequestedSyncLine(525, std::numeric_limits<double>::quiet_NaN(), false, true) == 1);
     Check(RequestedSyncLine(0, 0.5, false, true) == 0);
+
+    Check(IsValidStreamModeline(13.846, 720, 744, 809, 880, 480, 488, 494, 525, true));
+    Check(IsValidStreamModeline(13.875, 720, 741, 806, 888, 576, 581, 586, 625, true));
+    Check(!IsValidStreamModeline(0.0, 720, 744, 809, 880, 480, 488, 494, 525, true));
+    Check(!IsValidStreamModeline(13.846, 720, 700, 809, 880, 480, 488, 494, 525, true));
+    Check(!IsValidStreamModeline(13.846, 720, 744, 809, 880, 481, 488, 494, 525, true));
+    Check(!IsValidStreamModeline(40.0, 1280, 1300, 1320, 1400, 720, 725, 730, 750, false));
 
     return failures;
 }

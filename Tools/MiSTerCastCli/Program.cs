@@ -283,17 +283,11 @@ namespace MiSTerCast
                     return 3;
                 }
 
-                MiSTerCastInterop.SetModeline(
-                    selected.PixelClock,
-                    selected.HActive,
-                    selected.HBegin,
-                    selected.HEnd,
-                    selected.HTotal,
-                    selected.VActive,
-                    selected.VBegin,
-                    selected.VEnd,
-                    selected.VTotal,
-                    selected.Interlace);
+                if (!ApplyModeline(selected))
+                {
+                    QueueLog("Native modeline validation failed.", true);
+                    return 6;
+                }
                 MiSTerCastInterop.SetSource(
                     (byte)(options.Display - 1),
                     options.Audio,
@@ -311,17 +305,11 @@ namespace MiSTerCast
                     if (options.Cycles > 1)
                         QueueLog(String.Format(CultureInfo.InvariantCulture, "Starting stream cycle {0}/{1}.", cycle, options.Cycles), false);
 
-                    MiSTerCastInterop.SetModeline(
-                        selected.PixelClock,
-                        selected.HActive,
-                        selected.HBegin,
-                        selected.HEnd,
-                        selected.HTotal,
-                        selected.VActive,
-                        selected.VBegin,
-                        selected.VEnd,
-                        selected.VTotal,
-                        selected.Interlace);
+                    if (!ApplyModeline(selected))
+                    {
+                        QueueLog("Native modeline validation failed.", true);
+                        return 6;
+                    }
                     Interlocked.Exchange(ref connectionState, 0);
                     ConnectionResult.Reset();
                     streaming = MiSTerCastInterop.StartStream(address.ToString());
@@ -346,17 +334,11 @@ namespace MiSTerCast
                         if (!modeSwitched && switched != null && DateTime.UtcNow >= switchAt)
                         {
                             QueueLog("Switching live stream to modeline \"" + switched.Name + "\".", false);
-                            MiSTerCastInterop.SetModeline(
-                                switched.PixelClock,
-                                switched.HActive,
-                                switched.HBegin,
-                                switched.HEnd,
-                                switched.HTotal,
-                                switched.VActive,
-                                switched.VBegin,
-                                switched.VEnd,
-                                switched.VTotal,
-                                switched.Interlace);
+                            if (!ApplyModeline(switched))
+                            {
+                                QueueLog("Native switch-modeline validation failed.", true);
+                                return 6;
+                            }
                             modeSwitched = true;
                         }
                         Thread.Sleep(50);
@@ -398,6 +380,21 @@ namespace MiSTerCast
 
         private static void CaptureCallback(int width, int height, IntPtr buffer)
         {
+        }
+
+        private static bool ApplyModeline(Modeline modeline)
+        {
+            return MiSTerCastInterop.SetModeline(
+                modeline.PixelClock,
+                modeline.HActive,
+                modeline.HBegin,
+                modeline.HEnd,
+                modeline.HTotal,
+                modeline.VActive,
+                modeline.VBegin,
+                modeline.VEnd,
+                modeline.VTotal,
+                modeline.Interlace);
         }
 
         private static void QueueLog(string message, bool error)
