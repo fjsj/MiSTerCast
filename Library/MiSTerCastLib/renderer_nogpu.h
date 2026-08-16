@@ -120,6 +120,7 @@ private:
     uint8_t m_diagnostics_last_f1 = 0;
     bool m_diagnostics_have_sample = false;
     bool m_transport_failure_logged = false;
+    bool m_capture_failure_logged = false;
     bool m_audio_enabled = false;
 
     uint64_t time_start = 0;
@@ -226,6 +227,21 @@ void renderer_nogpu::draw()
 
     const uint64_t diagnostics_draw_start = CurrentTicks();
 
+    unsigned int drawIndex = lastVideoCaptureIndex;
+    const uint64_t capture_sequence = videoCaptureSequence.load(std::memory_order_relaxed);
+    int screenwidth = videoCaptures[drawIndex].width;
+    int screenheight = videoCaptures[drawIndex].height;
+    if (screenwidth <= 0 || screenheight <= 0 || videoCaptures[drawIndex].buffer.empty())
+    {
+        if (!m_capture_failure_logged)
+        {
+            LogMessage("Waiting for the first captured frame.");
+            m_capture_failure_logged = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        return;
+    }
+
     m_frame++;
 
     if (groovyMister.fpga.frame > static_cast<uint32_t>(m_frame))
@@ -237,10 +253,6 @@ void renderer_nogpu::draw()
     else
         m_field = 0;
 
-    unsigned int drawIndex = lastVideoCaptureIndex;
-    const uint64_t capture_sequence = videoCaptureSequence.load(std::memory_order_relaxed);
-    int screenwidth = videoCaptures[drawIndex].width;
-    int screenheight = videoCaptures[drawIndex].height;
     char* fb = groovyMister.getPBufferBlit(m_field);
     const size_t outputSize = Rgb24FrameSize(m_width, m_current_mode.vactive, m_current_mode.interlace);
     if (!TransformBgraToRgb24(
@@ -256,9 +268,15 @@ void renderer_nogpu::draw()
         reinterpret_cast<uint8_t*>(fb),
         outputSize))
     {
-        LogMessage("Unable to transform the captured frame.", true);
+        if (!m_capture_failure_logged)
+        {
+            LogMessage("Unable to transform the captured frame.", true);
+            m_capture_failure_logged = true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
         return;
     }
+    m_capture_failure_logged = false;
 
     bool valid_status = true;
 
