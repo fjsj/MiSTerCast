@@ -139,7 +139,6 @@ class GroovyMister
 	RIO_CQ m_receiveQueue;
 	RIO_RQ m_requestQueue;
 	HANDLE m_hIOCP;
-	OVERLAPPED m_receiveOverlapped;
 	RIO_BUFFERID m_sendRioBufferId;
 	RIO_BUF m_sendRioBuffer;
 	RIO_BUFFERID m_receiveRioBufferId;
@@ -150,10 +149,6 @@ class GroovyMister
 	RIO_BUF m_sendRioBufferAudio;
 	RIO_BUF *m_pBufsAudio;
 	SOCKET m_sockInputsFD;
-	bool m_wsaStarted;
-	bool m_rioFunctionsReady;
-	ULONG m_outstandingRioSends;
-	ULONG m_outstandingRioReceives;
 
 	LARGE_INTEGER m_tickStart;
 	LARGE_INTEGER m_tickEnd;
@@ -201,10 +196,6 @@ class GroovyMister
 	char *AllocateBufferSpace(const DWORD bufSize, const DWORD bufCount, DWORD& totalBufferSize, DWORD& totalBufferCount);
 	void Send(void *cmd, int cmdSize);
 	void SendStream(uint8_t whichBuffer, uint8_t field, uint32_t bytesToSend, uint32_t cSize);
-#ifdef _WIN32
-	ULONG DrainRioCompletions(RIO_CQ queue, ULONG& outstanding);
-	void WaitForRioSends(DWORD timeoutMilliseconds);
-#endif
 	void setTimeStart(void);
 	void setTimeEnd(void);
 	uint32_t DiffTime(void);

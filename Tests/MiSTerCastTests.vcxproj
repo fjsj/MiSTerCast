@@ -72,11 +72,10 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <PreprocessorDefinitions>_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\Library\MiSTerCastLib;..\External\lz4\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\Library\MiSTerCastLib;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>..\External\lz4\dll\liblz4.dll.a;Ws2_32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -85,12 +84,7 @@
     <ClCompile Include="groovy_protocol_tests.cpp" />
     <ClCompile Include="interlace_phase_tests.cpp" />
     <ClCompile Include="streaming_timing_tests.cpp" />
-    <ClCompile Include="transport_lifecycle_tests.cpp" />
-    <ClCompile Include="..\Library\MiSTerCastLib\groovymister.cpp" />
   </ItemGroup>
-  <Target Name="CopyTestRuntimeDependencies" AfterTargets="Build">
-    <Copy SourceFiles="..\External\lz4\dll\msys-lz4-1.dll" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
-  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
 </Project>
