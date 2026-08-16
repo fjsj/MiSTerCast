@@ -43,6 +43,24 @@ Run the native regression tests after building:
 Tests\Release\MiSTerCastTests.exe
 ```
 
+## Command-line hardware diagnostics
+
+`MiSTerCastCli.exe` is built beside the GUI and runs the same Windows capture, audio, frame transform, and Groovy_MiSTer transport code for a fixed duration. It requires a raw IPv4 address so a diagnostic run cannot silently select Wi-Fi through host-name resolution.
+
+List the modeline presets:
+
+```powershell
+FrontEnd\bin\Release\MiSTerCastCli.exe --list-modelines
+```
+
+Run a 15-second direct-Ethernet interlaced test:
+
+```powershell
+FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x480i NTSC (60Hz)" --duration 15
+```
+
+Use `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
+
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.
 - At least 1-2 frames of latency.
