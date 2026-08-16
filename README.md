@@ -11,6 +11,24 @@ The Microsoft VC++ x86 Redistributable is required. You can install it from here
 
 For audio, you will need to enable audio on the Groovy_MiSTer core.
 
+## Building from source
+
+The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:
+
+- Desktop development with C++
+- MSVC v143
+- A Windows 10 or Windows 11 SDK
+- MSBuild
+- The .NET Framework 4.7.2 targeting pack
+
+Download LZ4 1.9.4 from https://github.com/lz4/lz4/releases/download/v1.9.4/lz4_win32_v1_9_4.zip and extract it to `External/lz4`. The Win32 build links the package's import library and copies `msys-lz4-1.dll` beside `MiSTerCast.exe` automatically.
+
+From a Visual Studio developer shell, build the release application with:
+
+```powershell
+msbuild FrontEnd\MiSTerCast.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x86
+```
+
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.
 - At least 1-2 frames of latency.

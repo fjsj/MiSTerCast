@@ -6,9 +6,15 @@ using std::endl;
 //mingw missing headers
 //#if defined(_WIN32) && !defined(WSA_FLAG_REGISTERED_IO)
 #if defined(_WIN32)
+#ifndef WSA_FLAG_REGISTERED_IO
 #define WSA_FLAG_REGISTERED_IO 0x100
+#endif
+#ifndef SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER
 #define SIO_GET_MULTIPLE_EXTENSION_FUNCTION_POINTER _WSAIORW(IOC_WS2, 36)
+#endif
+#ifndef WSAID_MULTIPLE_RIO
 #define WSAID_MULTIPLE_RIO {0x8509e081, 0x96dd, 0x4005, { 0xb1, 0x65, 0x9e, 0x2e, 0xe8, 0xc7, 0x9e, 0x3f } }
+#endif
 
 /* Windows SDK actually have these definitions :
    * typedef struct RIO_BUFFERID_t *RIO_BUFFERID, **PRIO_BUFFERID;
