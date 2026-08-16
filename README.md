@@ -17,6 +17,8 @@ Frame-delay requests are sent to the MiSTer core and raster pacing is calculated
 
 MiSTer status packets are decoded explicitly as little-endian protocol data. Status ordering follows the wrapping 32-bit frame counter, so a long-running stream continues to accept acknowledgements when the counter rolls over.
 
+Each run writes a timestamped diagnostic log under `%LOCALAPPDATA%\MiSTerCast\Logs`. While streaming, one `[stream]` sample per second records capture and output cadence, maximum transform and send/wait time, commanded frame/field, MiSTer frame/F1 status, field repeats, frame-counter realignments, and protocol readiness flags. The GUI shows only the latest telemetry sample so long sessions do not continually grow the log panel. These diagnostics do not add extra network waits or change field selection.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:

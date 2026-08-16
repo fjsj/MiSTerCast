@@ -12,6 +12,7 @@ using System.Runtime.InteropServices;
 using Microsoft.Win32;
 using System.Globalization;
 using System.Net;
+using System.Text;
 
 namespace MiSTerCast
 {
@@ -51,6 +52,9 @@ namespace MiSTerCast
         HelpWindow helpWindow = null;
         const string lastSaveFilename = "lastsave.dat";
         string currentSaveFilename = null;
+        private StreamWriter diagnosticLogWriter;
+        private string diagnosticLogPath;
+        private TextBlock telemetryLogText;
 
         private void InitializeMiSTerCast()
         {
@@ -68,6 +72,11 @@ namespace MiSTerCast
         public MainWindow()
         {
             InitializeComponent();
+            string diagnosticLogError = InitializeDiagnosticLog();
+            if (diagnosticLogError == null)
+                Log("Diagnostic log: " + diagnosticLogPath);
+            else
+                Log("Creating diagnostic log failed: " + diagnosticLogError, true);
             ReadModelinesFile();
             PopulateModelineDropdown();
             InitializeMiSTerCast();
@@ -78,6 +87,8 @@ namespace MiSTerCast
             if (isStreaming)
                 MiSTerCastInterop.StopStream();
             MiSTerCastInterop.Shutdown();
+            diagnosticLogWriter?.Dispose();
+            diagnosticLogWriter = null;
             helpWindow.Close();
         }
 
@@ -375,14 +386,67 @@ namespace MiSTerCast
 
         private MiSTerCastInterop.LogDelegate LogDelegate;
 
+        private string InitializeDiagnosticLog()
+        {
+            try
+            {
+                string logDirectory = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MiSTerCast",
+                    "Logs");
+                Directory.CreateDirectory(logDirectory);
+                diagnosticLogPath = Path.Combine(
+                    logDirectory,
+                    "MiSTerCast-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
+                diagnosticLogWriter = new StreamWriter(
+                    new FileStream(diagnosticLogPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite),
+                    new UTF8Encoding(false));
+                diagnosticLogWriter.AutoFlush = true;
+                return null;
+            }
+            catch (Exception exception)
+            {
+                diagnosticLogWriter = null;
+                return exception.Message;
+            }
+        }
+
         private void Log(string message, bool error = false)
         {
+            string timestampedMessage = String.Format(
+                CultureInfo.InvariantCulture,
+                "[{0:yyyy-MM-dd HH:mm:ss.fff}] [{1}] {2}",
+                DateTime.Now,
+                error ? "ERROR" : "INFO",
+                message);
             this.Dispatcher.InvokeAsync(() =>
             {
-                TextBlock logText = new TextBlock() { Text = message };
+                try
+                {
+                    diagnosticLogWriter?.WriteLine(timestampedMessage);
+                }
+                catch
+                {
+                    diagnosticLogWriter?.Dispose();
+                    diagnosticLogWriter = null;
+                }
+
+                bool telemetry = message.StartsWith("[stream]", StringComparison.Ordinal);
+                TextBlock logText;
+                if (telemetry && telemetryLogText != null)
+                {
+                    logText = telemetryLogText;
+                    logText.Text = message;
+                }
+                else
+                {
+                    logText = new TextBlock() { Text = message };
+                    LogPanel.Children.Add(logText);
+                    if (telemetry)
+                        telemetryLogText = logText;
+                }
                 if (error)
                     logText.Background = Brushes.Pink;
-                LogPanel.Children.Add(logText);//.Insert(0, (logText));
             });
         }
 

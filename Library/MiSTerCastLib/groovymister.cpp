@@ -212,6 +212,18 @@ const char* GroovyMister::getVersion()
 	return &GROOVYMISTER_VERSION[0];
 }
 
+groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
+{
+	groovyMisterDiagnostics diagnostics = {};
+	diagnostics.commandFrame = m_frame;
+	diagnostics.frameTime = m_frameTime;
+	diagnostics.streamTime = m_streamTime;
+	diagnostics.emulationTime = m_emulationTime;
+	diagnostics.connected = m_isConnected;
+	diagnostics.haveFpgaStatus = m_haveFpgaStatus ? 1 : 0;
+	return diagnostics;
+}
+
 int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Frames, uint32_t soundRate, uint8_t soundChan, uint8_t rgbMode, uint16_t mtu)
 {
 	m_isConnected = 0;

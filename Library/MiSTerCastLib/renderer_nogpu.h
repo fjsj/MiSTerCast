@@ -12,6 +12,9 @@
 #include "AudioProcessing.h"
 #include "StreamingTiming.h"
 
+#include <iomanip>
+#include <sstream>
+
 uint64_t CurrentTicks()
 {
     // use the standard library clock function
@@ -87,6 +90,28 @@ private:
     double m_fd_margin = 1.5;
     nogpu_modeline m_current_mode;
 
+    uint64_t m_diagnostics_start = 0;
+    uint64_t m_diagnostics_last_draw = 0;
+    uint64_t m_diagnostics_last_capture = 0;
+    uint64_t m_diagnostics_max_gap = 0;
+    uint64_t m_diagnostics_max_transform = 0;
+    uint64_t m_diagnostics_max_send_wait = 0;
+    uint64_t m_diagnostics_frames = 0;
+    uint64_t m_diagnostics_captures = 0;
+    uint64_t m_diagnostics_capture_repeats = 0;
+    uint32_t m_diagnostics_status_updates = 0;
+    uint32_t m_diagnostics_f1_changes = 0;
+    uint32_t m_diagnostics_field_repeats = 0;
+    uint32_t m_diagnostics_frame_realignments = 0;
+    uint32_t m_diagnostics_last_frame = 0;
+    uint32_t m_diagnostics_last_fpga_frame = 0;
+    uint32_t m_diagnostics_last_frame_echo = 0;
+    uint16_t m_diagnostics_last_vcount = 0;
+    uint16_t m_diagnostics_last_vcount_echo = 0;
+    uint8_t m_diagnostics_last_field = 0;
+    uint8_t m_diagnostics_last_f1 = 0;
+    bool m_diagnostics_have_sample = false;
+
     uint64_t time_start = 0;
     uint64_t time_entry = 0;
     uint64_t time_blit = 0;
@@ -102,6 +127,12 @@ private:
     bool nogpu_init();
     bool nogpu_switch_video_mode();
     void nogpu_register_frametime(uint64_t frametime);
+    void nogpu_log_diagnostics(
+        uint64_t draw_start,
+        uint64_t transform_end,
+        uint64_t send_start,
+        uint64_t send_end,
+        uint64_t capture_sequence);
 };
 
 //============================================================
@@ -163,6 +194,8 @@ void renderer_nogpu::draw()
     if (!m_initialized)
         return;
 
+    const uint64_t diagnostics_draw_start = CurrentTicks();
+
     m_frame++;
 
     if (groovyMister.fpga.frame > m_frame)
@@ -175,6 +208,7 @@ void renderer_nogpu::draw()
         m_field = 0;
 
     unsigned int drawIndex = lastVideoCaptureIndex;
+    const uint64_t capture_sequence = videoCaptureSequence.load(std::memory_order_relaxed);
     int screenwidth = videoCaptures[drawIndex].width;
     int screenheight = videoCaptures[drawIndex].height;
     char* fb = groovyMister.getPBufferBlit(m_field);
@@ -245,12 +279,20 @@ void renderer_nogpu::draw()
         source_config.framedelay == 0);
 
     // Blit now
+    const uint64_t diagnostics_send_start = CurrentTicks();
     groovyMister.CmdBlit(m_frame, m_field, static_cast<uint16_t>(m_vsync_scanline), 15000, 0);
     groovyMister.WaitSync();
+    const uint64_t diagnostics_send_end = CurrentTicks();
 
-    time_blit = CurrentTicks();
+    time_blit = diagnostics_send_end;
     nogpu_register_frametime(time_entry - time_exit);
     time_exit = CurrentTicks();
+    nogpu_log_diagnostics(
+        diagnostics_draw_start,
+        time_entry,
+        diagnostics_send_start,
+        diagnostics_send_end,
+        capture_sequence);
 
     return;
 }
@@ -401,4 +443,115 @@ void renderer_nogpu::nogpu_register_frametime(uint64_t frametime)
     }
 
     time_frame_dm = max_diff;
+}
+
+//============================================================
+//  renderer_nogpu::nogpu_log_diagnostics
+//============================================================
+
+void renderer_nogpu::nogpu_log_diagnostics(
+    uint64_t draw_start,
+    uint64_t transform_end,
+    uint64_t send_start,
+    uint64_t send_end,
+    uint64_t capture_sequence)
+{
+    const groovyMisterDiagnostics transport = groovyMister.getDiagnostics();
+
+    if (!m_diagnostics_have_sample)
+    {
+        m_diagnostics_start = draw_start;
+        m_diagnostics_last_capture = capture_sequence;
+        m_diagnostics_have_sample = true;
+    }
+    else
+    {
+        const uint64_t draw_gap = draw_start - m_diagnostics_last_draw;
+        m_diagnostics_max_gap = std::max(m_diagnostics_max_gap, draw_gap);
+
+        const uint64_t captured = capture_sequence - m_diagnostics_last_capture;
+        m_diagnostics_captures += captured;
+        if (captured == 0)
+            m_diagnostics_capture_repeats++;
+
+        if (m_current_mode.interlace && m_diagnostics_last_field == static_cast<uint8_t>(m_field))
+            m_diagnostics_field_repeats++;
+
+        if (m_diagnostics_last_frame + 1 != static_cast<uint32_t>(m_frame))
+            m_diagnostics_frame_realignments++;
+
+        if (m_diagnostics_last_fpga_frame != groovyMister.fpga.frame ||
+            m_diagnostics_last_frame_echo != groovyMister.fpga.frameEcho ||
+            m_diagnostics_last_vcount != groovyMister.fpga.vCount ||
+            m_diagnostics_last_vcount_echo != groovyMister.fpga.vCountEcho ||
+            m_diagnostics_last_f1 != groovyMister.fpga.vgaF1)
+        {
+            m_diagnostics_status_updates++;
+        }
+
+        if (m_diagnostics_last_f1 != groovyMister.fpga.vgaF1)
+            m_diagnostics_f1_changes++;
+    }
+
+    m_diagnostics_frames++;
+    m_diagnostics_max_transform = std::max(m_diagnostics_max_transform, transform_end - draw_start);
+    m_diagnostics_max_send_wait = std::max(m_diagnostics_max_send_wait, send_end - send_start);
+    m_diagnostics_last_draw = draw_start;
+    m_diagnostics_last_capture = capture_sequence;
+    m_diagnostics_last_frame = static_cast<uint32_t>(m_frame);
+    m_diagnostics_last_field = static_cast<uint8_t>(m_field);
+    m_diagnostics_last_fpga_frame = groovyMister.fpga.frame;
+    m_diagnostics_last_frame_echo = groovyMister.fpga.frameEcho;
+    m_diagnostics_last_vcount = groovyMister.fpga.vCount;
+    m_diagnostics_last_vcount_echo = groovyMister.fpga.vCountEcho;
+    m_diagnostics_last_f1 = groovyMister.fpga.vgaF1;
+
+    const uint64_t elapsed_ticks = send_end - m_diagnostics_start;
+    if (elapsed_ticks < TicksPerSecond())
+        return;
+
+    const double elapsed_seconds = static_cast<double>(elapsed_ticks) / TicksPerSecond();
+    const double ticks_to_ms = 1000.0 / TicksPerSecond();
+    std::ostringstream message;
+    message << std::fixed << std::setprecision(2)
+        << "[stream] mode=" << m_current_mode.hactive << 'x' << m_current_mode.vactive
+        << (m_current_mode.interlace ? 'i' : 'p')
+        << " rate=" << (m_diagnostics_frames / elapsed_seconds)
+        << " capture=" << (m_diagnostics_captures / elapsed_seconds)
+        << " capture_repeat=" << m_diagnostics_capture_repeats
+        << " max_gap_ms=" << (m_diagnostics_max_gap * ticks_to_ms)
+        << " max_transform_ms=" << (m_diagnostics_max_transform * ticks_to_ms)
+        << " max_send_wait_ms=" << (m_diagnostics_max_send_wait * ticks_to_ms)
+        << " cmd=" << transport.commandFrame << ':' << m_field
+        << " fpga=" << groovyMister.fpga.frame << ':' << static_cast<unsigned int>(groovyMister.fpga.vgaF1)
+        << " echo=" << groovyMister.fpga.frameEcho
+        << " vcount=" << groovyMister.fpga.vCount << '/' << groovyMister.fpga.vCountEcho
+        << " status_updates=" << m_diagnostics_status_updates
+        << " f1_changes=" << m_diagnostics_f1_changes
+        << " field_repeats=" << m_diagnostics_field_repeats
+        << " frame_realign=" << m_diagnostics_frame_realignments
+        << " flags="
+        << static_cast<unsigned int>(groovyMister.fpga.vramEndFrame)
+        << static_cast<unsigned int>(groovyMister.fpga.vramReady)
+        << static_cast<unsigned int>(groovyMister.fpga.vramSynced)
+        << static_cast<unsigned int>(groovyMister.fpga.vgaFrameskip)
+        << static_cast<unsigned int>(groovyMister.fpga.vgaVblank)
+        << static_cast<unsigned int>(groovyMister.fpga.vramQueue)
+        << " stream_ms=" << (transport.streamTime / 10000.0)
+        << " emulation_ms=" << (transport.emulationTime / 10000.0)
+        << " target_ms=" << (transport.frameTime / 10000.0)
+        << " sync_line=" << m_vsync_scanline;
+    LogMessage(message.str());
+
+    m_diagnostics_start = send_end;
+    m_diagnostics_max_gap = 0;
+    m_diagnostics_max_transform = 0;
+    m_diagnostics_max_send_wait = 0;
+    m_diagnostics_frames = 0;
+    m_diagnostics_captures = 0;
+    m_diagnostics_capture_repeats = 0;
+    m_diagnostics_status_updates = 0;
+    m_diagnostics_f1_changes = 0;
+    m_diagnostics_field_repeats = 0;
+    m_diagnostics_frame_realignments = 0;
 }

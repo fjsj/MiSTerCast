@@ -60,6 +60,15 @@ typedef struct fpgaStatus{
 	uint8_t vramQueue; 	//1-fpga has pixels prepared on vram
 } fpgaStatus;
 
+typedef struct groovyMisterDiagnostics {
+	uint32_t commandFrame;
+	uint32_t frameTime;
+	uint32_t streamTime;
+	uint32_t emulationTime;
+	uint8_t connected;
+	uint8_t haveFpgaStatus;
+} groovyMisterDiagnostics;
+
 typedef struct fpgaJoyInputs{
 	uint32_t joyFrame;	//joystick blit frame
 	uint8_t  joyOrder;	//joystick blit order
@@ -124,6 +133,7 @@ class GroovyMister
 
 	void setVerbose(uint8_t sev);
 	const char* getVersion();
+	groovyMisterDiagnostics getDiagnostics() const noexcept;
 
  private:
 

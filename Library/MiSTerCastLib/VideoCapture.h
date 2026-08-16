@@ -11,6 +11,7 @@ struct Bitmap {
 
 SourceOptions source_config = {};
 std::atomic_uint lastVideoCaptureIndex = 0;
+std::atomic<uint64_t> videoCaptureSequence = 0;
 Bitmap* videoCaptures = nullptr;
 int    displayIndex = 0;
 ID3D11Device*           d3dDevice = nullptr;
@@ -323,6 +324,7 @@ bool TickVideoCapture()
         captureFunction(width, height, videoCaptures[nextIndex].buffer.data());
 
     lastVideoCaptureIndex = nextIndex;
+    videoCaptureSequence.fetch_add(1, std::memory_order_relaxed);
 
     cpuTex->Release();
     gpuTex->Release();
