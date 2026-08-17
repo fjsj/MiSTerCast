@@ -17,12 +17,14 @@ Useful Groovy_MiSTer setup references:
 - Microsoft Visual C++ x86 Redistributable: https://aka.ms/vs/17/release/vc_redist.x86.exe
 - Audio enabled in the core if you want sound
 - A Windows display running near the output refresh rate, normally about 60 Hz (try also 59,94 Hz if supported)
+- Windows 10 version 1903 or newer to cast a single application window
 
 ## New Features
 
 - Point, Bilinear, and Line Blend sampling
 - Optional full-height framebuffer mode for interlaced output
 - Safe stop/restart behavior and non-blocking host-name lookup
+- Full-display or isolated single-window capture from the GUI
 
 Direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
 
@@ -71,6 +73,7 @@ Logs are written under `%LOCALAPPDATA%\MiSTerCast\Logs`. The CLI can use another
 - The full-height interlaced framebuffer roughly doubles video bandwidth and is disabled by default.
 - Nothing above 720x480i is currently recommended because of MiSTer-side throughput.
 - A high-refresh Windows desktop is not supported well; match the desktop refresh to the output when possible.
+- A minimized single-window source pauses on its last frame until the window is restored.
 - The bundled modelines are starting points. You can add modes to `modelines.dat`.
 
 Build instructions, implementation notes, and the complete test procedure are in [AGENTS.md](AGENTS.md).

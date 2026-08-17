@@ -41,6 +41,7 @@ enum CropMode : int
     X5,
     Full43,
     Full54,
+    FullSource,
 };
 
 struct SourceOptions {
@@ -57,6 +58,7 @@ struct SourceOptions {
     INT16 yoffset;
     Rotation rotation;
     SamplingMode sampling;
+    UINT_PTR windowHandle;
 };
 
 typedef void(__stdcall *log_function)(const char* message, bool error);
@@ -125,3 +127,5 @@ MISTERCASTLIB_API bool SetSourceEx(
     INT16 yoffset,
     UINT8 rotation,
     UINT8 sampling);
+
+MISTERCASTLIB_API bool SetCaptureWindow(UINT_PTR windowHandle);

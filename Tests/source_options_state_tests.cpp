@@ -23,7 +23,8 @@ bool SameOptions(const SourceOptions& left, const SourceOptions& right)
         left.xoffset == right.xoffset &&
         left.yoffset == right.yoffset &&
         left.rotation == right.rotation &&
-        left.sampling == right.sampling;
+        left.sampling == right.sampling &&
+        left.windowHandle == right.windowHandle;
 }
 }
 
@@ -31,10 +32,10 @@ int RunSourceOptionsStateTests()
 {
     const SourceOptions first = {
         true, 1, 1, true, false, Alignment::TopLeft, CropMode::X1,
-        320, 240, -10, 20, Rotation::CW90, SamplingMode::Bilinear };
+        320, 240, -10, 20, Rotation::CW90, SamplingMode::Bilinear, 0x1234 };
     const SourceOptions second = {
         false, 9, 2, false, true, Alignment::BottomRight, CropMode::Full54,
-        720, 480, 30, -40, Rotation::CCW90, SamplingMode::LineBlend };
+        720, 480, 30, -40, Rotation::CCW90, SamplingMode::LineBlend, 0x5678 };
 
     SourceOptionsState state;
     state.publish(first);

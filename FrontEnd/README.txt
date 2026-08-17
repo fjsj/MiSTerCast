@@ -13,6 +13,7 @@ For sound, enable audio in the Groovy_MiSTer core.
 - Bilinear smooths neighboring pixels in both directions.
 - Line Blend reduces vertical CRT shimmer while preserving horizontal sharpness. With 90-degree rotation, it blends source columns.
 - Full-height framebuffer mode is available for interlaced output, but roughly doubles video bandwidth.
+- The GUI can cast a complete display or isolate one application window. Single-window capture requires Windows 10 version 1903 or newer.
 - Diagnostic logs are stored under %LOCALAPPDATA%\MiSTerCast\Logs.
 - MiSTerCastCli.exe provides repeatable frame-counter, mode-switch, stop/start, and sampling tests.
 
@@ -26,6 +27,7 @@ For sound, enable audio in the Groovy_MiSTer core.
 - Wi-Fi can overload the MiSTer-side receiver. Use direct Ethernet for stable, low-latency streaming.
 - Nothing above 720x480i is currently recommended because of MiSTer-side throughput.
 - High-refresh Windows desktops are not supported well. Match the desktop refresh to the output when possible.
+- A minimized single-window source pauses on its last frame until restored.
 
 <Bold>Notes</Bold>
 The bundled modelines are starting points. You can add modes to modelines.dat.

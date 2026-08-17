@@ -7,6 +7,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
@@ -48,6 +49,25 @@ namespace MiSTerCast
         public byte sampling;
     }
 
+    sealed class WindowCaptureSource
+    {
+        public IntPtr Handle { get; set; }
+        public string Title { get; set; }
+        public string ProcessName { get; set; }
+
+        public string Key
+        {
+            get { return ProcessName + "\t" + Title; }
+        }
+
+        public override string ToString()
+        {
+            return String.IsNullOrWhiteSpace(ProcessName)
+                ? Title
+                : Title + " — " + ProcessName;
+        }
+    }
+
     public partial class MainWindow : Window
     {
         private bool isInitialized = false;
@@ -58,6 +78,46 @@ namespace MiSTerCast
         private StreamWriter diagnosticLogWriter;
         private string diagnosticLogPath;
         private TextBlock telemetryLogText;
+        private bool isRefreshingWindowSources;
+        private bool isLoadingCaptureSettings;
+
+        private delegate bool EnumWindowsCallback(IntPtr windowHandle, IntPtr parameter);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool EnumWindows(EnumWindowsCallback callback, IntPtr parameter);
+
+        [DllImport("user32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool IsWindowVisible(IntPtr windowHandle);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetWindowText(IntPtr windowHandle, StringBuilder text, int maximumCount);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+        private static extern int GetWindowTextLength(IntPtr windowHandle);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern uint GetWindowThreadProcessId(IntPtr windowHandle, out uint processId);
+
+        [DllImport("user32.dll", EntryPoint = "GetWindowLongW", SetLastError = true)]
+        private static extern int GetWindowLong(IntPtr windowHandle, int index);
+
+        [DllImport("user32.dll")]
+        private static extern IntPtr GetWindow(IntPtr windowHandle, uint command);
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmGetWindowAttribute(
+            IntPtr windowHandle,
+            int attribute,
+            out int value,
+            int valueSize);
+
+        private const int ExtendedWindowStyleIndex = -20;
+        private const int ToolWindowStyle = 0x00000080;
+        private const int AppWindowStyle = 0x00040000;
+        private const uint GetOwnerWindow = 4;
+        private const int DwmWindowAttributeCloaked = 14;
 
         private void InitializeMiSTerCast()
         {
@@ -80,6 +140,7 @@ namespace MiSTerCast
                 Log("Diagnostic log: " + diagnosticLogPath);
             else
                 Log("Creating diagnostic log failed: " + diagnosticLogError, true);
+            RefreshWindowSources(null, true);
             ReadModelinesFile();
             PopulateModelineDropdown();
             InitializeMiSTerCast();
@@ -166,7 +227,7 @@ namespace MiSTerCast
                 {
                     isStreaming = false;
                     ToggleStreamButton.Content = "Start Stream";
-                    CaptureSourceBox.IsEnabled = true;
+                    SetCaptureSelectionEnabled(true);
                     EnableAudioCheckBox.IsEnabled = true;
                     ApplyModelineButton.IsEnabled = false;
                 }
@@ -230,16 +291,24 @@ namespace MiSTerCast
                     {
                         isStreaming = true;
                         ToggleStreamButton.Content = "Stop Stream";
-                        CaptureSourceBox.IsEnabled = false;
+                        SetCaptureSelectionEnabled(false);
                         EnableAudioCheckBox.IsEnabled = false;
                     }
                 }
             }
         }
 
+        private void SetCaptureSelectionEnabled(bool enabled)
+        {
+            CaptureModeBox.IsEnabled = enabled;
+            CaptureSourceBox.IsEnabled = enabled;
+            WindowSourceBox.IsEnabled = enabled;
+            RefreshWindowsButton.IsEnabled = enabled;
+        }
+
         #region Settings
 
-        const int SettingsVersion = 3;
+        const int SettingsVersion = 4;
 
         private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
@@ -288,6 +357,11 @@ namespace MiSTerCast
                                 sw.WriteLine(CaptureXOffset.Text);
                                 sw.WriteLine(CaptureYOffset.Text);
                                 sw.WriteLine(SamplingComboBox.SelectedIndex);
+                                sw.WriteLine(CaptureModeBox.SelectedIndex);
+                                WindowCaptureSource selectedWindow = WindowSourceBox.SelectedItem as WindowCaptureSource;
+                                sw.WriteLine(selectedWindow == null
+                                    ? String.Empty
+                                    : selectedWindow.Key.Replace("\r", " ").Replace("\n", " "));
 
                                 Log("Settings saved.");
                             }
@@ -372,6 +446,17 @@ namespace MiSTerCast
             SamplingComboBox.SelectedIndex = settingsVersion >= 3
                 ? Math.Max(0, Math.Min(int.Parse(sr.ReadLine()), SamplingComboBox.Items.Count - 1))
                 : 0;
+            int captureMode = settingsVersion >= 4 ? int.Parse(sr.ReadLine()) : 0;
+            string savedWindowKey = settingsVersion >= 4 ? sr.ReadLine() : null;
+            isLoadingCaptureSettings = true;
+            CaptureModeBox.SelectedIndex = Math.Max(0, Math.Min(captureMode, CaptureModeBox.Items.Count - 1));
+            isLoadingCaptureSettings = false;
+            if (CaptureModeBox.SelectedIndex == 1)
+            {
+                RefreshWindowSources(savedWindowKey, false);
+                if (WindowSourceBox.SelectedItem == null)
+                    Log("The saved capture window is not currently available. Restore it and refresh the window list.", true);
+            }
 
             Log("Settings loaded.");
         }
@@ -518,6 +603,123 @@ namespace MiSTerCast
 
         private SourceOptions currentSourceOptions;
 
+        private List<WindowCaptureSource> EnumerateCaptureWindows()
+        {
+            List<WindowCaptureSource> windows = new List<WindowCaptureSource>();
+            uint ownProcessId = (uint)Process.GetCurrentProcess().Id;
+            EnumWindows((windowHandle, parameter) =>
+            {
+                if (!IsWindowVisible(windowHandle))
+                    return true;
+
+                int titleLength = GetWindowTextLength(windowHandle);
+                if (titleLength <= 0)
+                    return true;
+
+                uint processId;
+                GetWindowThreadProcessId(windowHandle, out processId);
+                if (processId == 0 || processId == ownProcessId)
+                    return true;
+
+                int extendedStyle = GetWindowLong(windowHandle, ExtendedWindowStyleIndex);
+                bool explicitAppWindow = (extendedStyle & AppWindowStyle) != 0;
+                if ((extendedStyle & ToolWindowStyle) != 0 && !explicitAppWindow)
+                    return true;
+                if (GetWindow(windowHandle, GetOwnerWindow) != IntPtr.Zero && !explicitAppWindow)
+                    return true;
+
+                int cloaked;
+                if (DwmGetWindowAttribute(
+                    windowHandle,
+                    DwmWindowAttributeCloaked,
+                    out cloaked,
+                    sizeof(int)) == 0 && cloaked != 0)
+                {
+                    return true;
+                }
+
+                StringBuilder titleBuilder = new StringBuilder(titleLength + 1);
+                if (GetWindowText(windowHandle, titleBuilder, titleBuilder.Capacity) <= 0)
+                    return true;
+
+                string title = titleBuilder.ToString().Trim();
+                if (title.Length == 0)
+                    return true;
+
+                string processName = String.Empty;
+                try
+                {
+                    processName = Process.GetProcessById((int)processId).ProcessName;
+                }
+                catch
+                {
+                }
+
+                windows.Add(new WindowCaptureSource
+                {
+                    Handle = windowHandle,
+                    Title = title,
+                    ProcessName = processName
+                });
+                return true;
+            }, IntPtr.Zero);
+
+            return windows
+                .OrderBy(window => window.Title, StringComparer.CurrentCultureIgnoreCase)
+                .ThenBy(window => window.ProcessName, StringComparer.CurrentCultureIgnoreCase)
+                .ToList();
+        }
+
+        private void RefreshWindowSources(string preferredKey, bool selectFirst)
+        {
+            WindowCaptureSource previousSelection = WindowSourceBox.SelectedItem as WindowCaptureSource;
+            IntPtr previousHandle = previousSelection == null ? IntPtr.Zero : previousSelection.Handle;
+            string selectionKey = preferredKey ?? (previousSelection == null ? null : previousSelection.Key);
+            List<WindowCaptureSource> windows = EnumerateCaptureWindows();
+
+            WindowCaptureSource selected = windows.FirstOrDefault(window => window.Handle == previousHandle);
+            if (selected == null && !String.IsNullOrEmpty(selectionKey))
+                selected = windows.FirstOrDefault(window => window.Key == selectionKey);
+            if (selected == null && selectFirst)
+                selected = windows.FirstOrDefault();
+
+            isRefreshingWindowSources = true;
+            WindowSourceBox.ItemsSource = windows;
+            WindowSourceBox.SelectedItem = selected;
+            isRefreshingWindowSources = false;
+
+            if (CaptureModeBox.SelectedIndex == 1 && isInitialized)
+                OnCaptureSourceChanged();
+        }
+
+        private void CaptureMode_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (WindowSourcePanel == null || CaptureSourceBox == null)
+                return;
+
+            bool captureWindow = CaptureModeBox.SelectedIndex == 1;
+            CaptureSourceBox.Visibility = captureWindow ? Visibility.Collapsed : Visibility.Visible;
+            WindowSourcePanel.Visibility = captureWindow ? Visibility.Visible : Visibility.Collapsed;
+            if (captureWindow && WindowSourceBox.Items.Count == 0)
+                RefreshWindowSources(null, true);
+            if (captureWindow && !isLoadingCaptureSettings && CropComboBox != null)
+                CropComboBox.SelectedIndex = 8;
+
+            if (isInitialized)
+                OnCaptureSourceChanged();
+        }
+
+        private void WindowSource_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (!isRefreshingWindowSources && isInitialized && CaptureModeBox.SelectedIndex == 1)
+                OnCaptureSourceChanged();
+        }
+
+        private void RefreshWindowsButton_Click(object sender, RoutedEventArgs e)
+        {
+            RefreshWindowSources(null, true);
+        }
+
         private void OnCaptureSourceChanged()
         {
             currentSourceOptions.display = (byte)CaptureSourceBox.SelectedIndex;
@@ -536,6 +738,17 @@ namespace MiSTerCast
 
             PreviewImage.Visibility = currentSourceOptions.preview ? Visibility.Visible : Visibility.Hidden;
             PreviewDisabledLabel.Visibility = currentSourceOptions.preview ? Visibility.Hidden : Visibility.Visible;
+
+            IntPtr captureWindowHandle = IntPtr.Zero;
+            if (CaptureModeBox.SelectedIndex == 1)
+            {
+                WindowCaptureSource selectedWindow = WindowSourceBox.SelectedItem as WindowCaptureSource;
+                if (selectedWindow == null)
+                    return;
+                captureWindowHandle = selectedWindow.Handle;
+            }
+            if (!MiSTerCastInterop.SetCaptureWindow(captureWindowHandle))
+                return;
 
             if (currentSourceOptions.width > 0 && currentSourceOptions.height > 0)
             {

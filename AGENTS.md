@@ -15,6 +15,8 @@ The supported build is `Release|x86`. The x64 project configuration is not a sup
 ### Capture and transform
 
 - Desktop Duplication captures BGRA frames into a three-entry CPU bitmap ring.
+- GUI display sources use Desktop Duplication. GUI window sources use `Windows.Graphics.Capture` through the `IGraphicsCaptureItemInterop` HWND path, so overlapping windows are not composited into the selected source. A minimized source pauses and the renderer repeats the newest complete frame until capture resumes.
+- Window size changes recreate the two-entry WinRT frame pool after the outstanding frame is closed. Display/window switches stop and join the capture worker before replacing D3D resources.
 - A CPU-readable D3D11 staging texture is reused until the capture dimensions or DXGI format changes. `[capture] Created reusable staging texture ...` should appear only at capture startup, source-size/format change, or capture reinitialization.
 - Capture loss keeps the worker alive and reinitializes Desktop Duplication instead of terminating the GUI.
 - The render worker always transforms the newest complete capture. Static desktops may produce a low `capture=` rate because Desktop Duplication reports only changes; `rate=` is the relevant output cadence.
@@ -31,7 +33,7 @@ The supported build is `Release|x86`. The x64 project configuration is not a sup
 - Interlaced field buffers select full output row `row * 2 + !(field & 1)`, preserving the Groovy_MiSTer protocol's field/display parity. Filtering is computed for the logical full-height output before the requested field rows are selected.
 - Tables and scratch vectors are `thread_local` and retain capacity after warm-up. The filters add transform work but do not queue or buffer an additional frame.
 
-The legacy native `SetSource` export remains ABI-compatible and selects Point. GUI and CLI callers use `SetSourceEx`, which adds the sampling value. GUI save files are version 3; versions 1 and 2 load with Point sampling.
+The legacy native `SetSource` export remains ABI-compatible and selects Point. GUI and CLI callers use `SetSourceEx`, which adds the sampling value. `SetCaptureWindow` accepts a pointer-sized HWND and keeps both source exports ABI-compatible. GUI save files are version 4; versions 1 and 2 load with Point sampling, and versions 1-3 load in display mode.
 
 ### Interlace phase and framebuffer modes
 
@@ -107,6 +109,8 @@ Install Visual Studio 2022 or Visual Studio 2022 Build Tools with:
 - .NET Framework 4.7.2 targeting pack
 
 No particular newer SDK build is required. MTU validation links `Iphlpapi.lib`, which is part of the Windows SDK and adds no separate package or runtime dependency.
+
+Single-window capture uses the Windows SDK C++/WinRT headers and `WindowsApp.lib`, requires C++17, and has no additional redistributable dependency. The runtime feature requires Windows 10 version 1903 or newer.
 
 Download LZ4 1.9.4 from https://github.com/lz4/lz4/releases/download/v1.9.4/lz4_win32_v1_9_4.zip and extract it to `External/lz4`. The Win32 projects link `External/lz4/dll/liblz4.dll.a`; post-build steps copy `msys-lz4-1.dll` beside the GUI and CLI.
 

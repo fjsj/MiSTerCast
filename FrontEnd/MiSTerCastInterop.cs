@@ -99,5 +99,8 @@ namespace MiSTerCast
             Int16 yoffset,
             byte rotation,
             byte sampling);
+
+        [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetCaptureWindow", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool SetCaptureWindow(IntPtr windowHandle);
     }
 }

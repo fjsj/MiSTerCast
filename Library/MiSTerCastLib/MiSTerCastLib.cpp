@@ -34,8 +34,11 @@ std::atomic_bool capturing_screen = false;
 void capture_screen()
 {
     LogMessage("Screen capture starting.");
+    bool apartmentInitialized = false;
     try
     {
+        winrt::init_apartment(winrt::apartment_type::multi_threaded);
+        apartmentInitialized = true;
         do
         {
             TickVideoCapture();
@@ -49,6 +52,8 @@ void capture_screen()
     {
         LogMessage("Screen capture stopped after an unexpected error.", true);
     }
+    if (apartmentInitialized)
+        winrt::uninit_apartment();
     capturing_screen = false;
     LogMessage("Screen capture stopped.");
 }
@@ -362,6 +367,35 @@ MISTERCASTLIB_API bool SetModelineEx(
     return true;
 }
 
+bool reinitialize_capture_source(
+    const SourceOptions& previousSource,
+    const SourceOptions& requestedSource)
+{
+    stop_capture_worker();
+    CleanupVideoCapture();
+    source_config.publish(requestedSource);
+    if (InitializeVideoCapture(requestedSource.display, captureFunction) &&
+        start_capture_worker())
+    {
+        return true;
+    }
+
+    LogMessage("Failed to initialize the selected video capture source.", true);
+    stop_capture_worker();
+    CleanupVideoCapture();
+    source_config.publish(previousSource);
+    if (InitializeVideoCapture(previousSource.display, captureFunction) &&
+        start_capture_worker())
+    {
+        LogMessage("Restored the previous video capture source.");
+    }
+    else
+    {
+        LogMessage("Failed to restore the previous video capture source.", true);
+    }
+    return false;
+}
+
 MISTERCASTLIB_API bool SetSource(
     UINT8 display,
     bool audio,
@@ -439,29 +473,34 @@ MISTERCASTLIB_API bool SetSourceEx(
         break;
     }
 
-    if (displayIndex != source.display)
+    if (source.windowHandle == 0 && displayIndex != source.display)
     {
-        stop_capture_worker();
-        CleanupVideoCapture();
-        source_config.publish(source);
-        if (!InitializeVideoCapture(source.display, captureFunction))
-        {
-            LogMessage("Failed to initialize the selected video capture source.", true);
-            CleanupVideoCapture();
-            source_config.publish(previousSource);
-            if (InitializeVideoCapture(previousSource.display, captureFunction))
-                start_capture_worker();
-            else
-                LogMessage("Failed to restore the previous video capture source.", true);
-            return false;
-        }
-        if (!start_capture_worker())
-            return false;
-    }
-    else
-    {
-        source_config.publish(source);
+        return reinitialize_capture_source(previousSource, source);
     }
 
+    source_config.publish(source);
+
     return true;
+}
+
+MISTERCASTLIB_API bool SetCaptureWindow(UINT_PTR windowHandle)
+{
+    if (!initialized)
+    {
+        LogMessage("MiSTerCast must be initialized before selecting a capture window.", true);
+        return false;
+    }
+    if (windowHandle != 0 && !IsWindow(reinterpret_cast<HWND>(windowHandle)))
+    {
+        LogMessage("The selected capture window no longer exists.", true);
+        return false;
+    }
+
+    const SourceOptions previousSource = source_config.snapshot();
+    if (previousSource.windowHandle == windowHandle)
+        return true;
+
+    SourceOptions source = previousSource;
+    source.windowHandle = windowHandle;
+    return reinitialize_capture_source(previousSource, source);
 }
