@@ -123,6 +123,8 @@ msbuild FrontEnd\MiSTerCast.sln /m /t:Rebuild /p:Configuration=Release /p:Platfo
 Tests\Release\MiSTerCastTests.exe
 ```
 
+Some agent-hosted PowerShell sessions inherit both `Path` and `PATH`. If MSBuild fails before compilation with `MSB6001` and reports those duplicate environment keys, start a child shell with PowerShell's `Start-Process -UseNewEnvironment`, set `TEMP` and `TMP` inside that child to a writable task-specific directory, and run MSBuild with `/m:1 /nr:false`. Disabling parallelism and node reuse prevents an earlier MSBuild worker from retaining the duplicate environment. A directly launched native child can preserve both case variants even when PowerShell displays only one. This is a session-launcher issue; do not modify persistent user or machine environment variables to work around it.
+
 The tests compile with `/W4 /WX`. Keep deterministic coverage for:
 
 - point, bilinear, and line-blend pixels, rotations, reductions, enlargements, flat images, large ratios, and invalid modes;
