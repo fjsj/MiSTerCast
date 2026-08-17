@@ -86,8 +86,8 @@ private:
     bool m_initialized = false;
     bool m_first_blit = true;
     int m_compression = 0;
-    int m_frame = 0;
-    int m_field = 0;
+    uint32_t m_frame = 0;
+    uint8_t m_field = 0;
     unsigned int m_width = 0;
     unsigned int m_height = 0;
     int m_vtotal = 0;
@@ -244,14 +244,7 @@ void renderer_nogpu::draw()
 
     m_frame++;
 
-    if (groovyMister.fpga.frame > static_cast<uint32_t>(m_frame))
-        m_frame = groovyMister.fpga.frame + 1;
-
-    // get current field for interlaced mode
-    if (m_current_mode.interlace)
-        m_field = !groovyMister.fpga.vgaF1 ^ ((m_frame - groovyMister.fpga.frame) % 2);
-    else
-        m_field = 0;
+    groovyMister.AlignFrame(m_frame, m_field);
 
     char* fb = groovyMister.getPBufferBlit(m_field);
     const size_t outputSize = Rgb24FrameSize(m_width, m_current_mode.vactive, m_current_mode.interlace);

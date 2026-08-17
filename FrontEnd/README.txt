@@ -13,7 +13,7 @@ For audio, you will need to enable audio on the Groovy_MiSTer core.
 - Latency depends on the capture and network path; direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
 - Wi-Fi may drop complete video or audio batches when it cannot keep pace. Direct Ethernet is recommended for stable low-latency streaming.
 - The Windows sender keeps its RIO/FPGA-acknowledgement pacing and does not add the Linux sender's UDP rate shaper or audio prebuffer, which could increase gaming latency.
-- Interlaced field selection retains the original Windows formula based on the MiSTer's F1 and frame counters. Linux's additional mode-switch phase recovery was prototyped and reverted, but its negative test was confounded by Wi-Fi; it still needs a controlled direct-Ethernet A/B test (issue #9).
+- Interlaced field selection starts from protocol field zero after a mode switch, then uses the original Windows formula based on the MiSTer's F1 and frame counters after a matching acknowledgement establishes the new phase (issue #9).
 - Nothing over 720x480i is recommended at the moment due to throughput on MiSTer. This will improve soon.
 - High refresh rate monitors are not supported due to frame times. Please change your monitor to ~60hz.
 

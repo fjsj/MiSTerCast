@@ -739,6 +739,7 @@ void GroovyMister::CmdSwitchres(double pClock, uint16_t hActive, uint16_t hBegin
 	
 	m_interlace = interlace_modeline;
 	m_vTotal    = vTotal;
+	m_interlacePhase.Reset(interlace_modeline != 0);
 	m_delta_enabled[0] = 0;
 	m_delta_enabled[1] = 0;
 
@@ -964,6 +965,11 @@ void GroovyMister::CmdAudio(uint16_t soundSize)
 
 	if (!SendStream(1, 0, soundSize, 0))
 		++m_droppedAudioBatches;
+}
+
+void GroovyMister::AlignFrame(uint32_t& frame, uint8_t& field)
+{
+	m_interlacePhase.Align(frame, field, fpga.frame, fpga.vgaF1);
 }
 
 uint32_t GroovyMister::getACK(DWORD dwMilliseconds)
@@ -1580,6 +1586,7 @@ bool GroovyMister::setFpgaStatus(void)
 	fpga.audio         = (status.bits & 0x40) != 0;
 	fpga.vramQueue     = (status.bits & 0x80) != 0;
 	m_haveFpgaStatus = true;
+	m_interlacePhase.Acknowledge(m_frame, status.frameEcho);
 
 	LOG(2,"[MiSTer] ACK %d %d / %d %d / bits(%d%d%d%d%d%d%d%d)\n", fpga.frameEcho, fpga.vCountEcho, fpga.frame, fpga.vCount, fpga.vramReady, fpga.vramEndFrame, fpga.vramSynced, fpga.vgaFrameskip, fpga.vgaVblank, fpga.vgaF1, fpga.audio, fpga.vramQueue);
 	return true;
