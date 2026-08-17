@@ -1,94 +1,78 @@
 # MiSTerCast
-A general-purpose tool for streaming your Windows PC screen to your MiSTer through the Groovy_MiSTer core.
 
-This is not a replacement for Groovy_Mame or other integrated emulators.	
+MiSTerCast streams your Windows PC screen and loopback audio to the Groovy_MiSTer core. It is a general-purpose desktop caster, not a replacement for GroovyMAME or another emulator with integrated Groovy_MiSTer support.
 
-Make sure you already have Groovy_Mame working well with Groovy_MiSTer before using MiSTerCast. A direct Ethernet connection to your MiSTer is recommended. Enter that adapter's raw IPv4 address in MiSTerCast when the MiSTer is also reachable over Wi-Fi; a host name such as `MiSTer` can resolve to the slower interface. Host-name lookup remains supported, runs without blocking the GUI, and logs the selected IPv4 address.
-https://github.com/lutechsource/MiSTerStuff/blob/main/GroovyMiSTer/mame_documentation.md
-https://github.com/psakhis/Groovy_MiSTer
+A direct Ethernet connection is strongly recommended. If the MiSTer is also reachable over Wi-Fi, enter the Ethernet adapter's raw IPv4 address so a host name cannot select the slower route.
 
-The Microsoft VC++ x86 Redistributable is required. You can install it from here: https://aka.ms/vs/17/release/vc_redist.x86.exe
+Useful Groovy_MiSTer setup references:
 
-For audio, you will need to enable audio on the Groovy_MiSTer core.
-MiSTerCast converts the default Windows loopback endpoint's 32-bit floating-point mix to stereo signed 16-bit PCM. Mono endpoints are duplicated to stereo; for multichannel endpoints, the front-left and front-right channels are used.
-The Windows sender intentionally forwards the newest audio accumulated during each render cycle instead of adding the Linux PulseAudio prebuffer, preserving the lower-latency WASAPI path for gaming. A long-stall backlog is capped to the newest protocol-safe block.
+- https://github.com/lutechsource/MiSTerStuff/blob/main/GroovyMiSTer/mame_documentation.md
+- https://github.com/psakhis/Groovy_MiSTer
 
-Frame-delay requests are sent to the MiSTer core and raster pacing is calculated from the active modeline. Automatic interlaced output limits the requested sync line to the first half of the raster so an alternating field upload cannot race the field being displayed. Manual frame-delay values remain explicit and are not capped this way.
+## Requirements
 
-MiSTer status packets are decoded explicitly as little-endian protocol data. Status ordering follows the wrapping 32-bit frame counter, so a long-running stream continues to accept acknowledgements when the counter rolls over.
+- A MiSTer running the Groovy_MiSTer core
+- Microsoft Visual C++ x86 Redistributable: https://aka.ms/vs/17/release/vc_redist.x86.exe
+- Audio enabled in the core if you want sound
+- A Windows display running near the output refresh rate, normally about 60 Hz
 
-Each run writes a timestamped diagnostic log under `%LOCALAPPDATA%\MiSTerCast\Logs`; the CLI can override that location with `--log-directory`. While streaming, one `[stream]` sample per second records capture and output cadence, maximum transform and send/wait time, commanded frame/field, MiSTer frame/F1 status, field repeats, frame-counter realignments, and protocol readiness flags. The GUI shows only the latest telemetry sample so long sessions do not continually grow the log panel. These diagnostics do not add extra network waits or change field selection.
+## Features
 
-For repeatable phase-recovery tests, the CLI accepts `--cycles`, `--switch-modeline`, `--skip-every`, `--stall-every`, and `--stall-ms`. These fault options are disabled by default and only affect streams started after the diagnostic configuration is applied. A skipped blit advances the sender's logical frame but preserves one field period; a stall pauses before a blit. The `[stream]` diagnostics report the phase as `local` or `locked` and include cumulative injected skip/stall counts.
+- GUI and command-line streaming tools
+- Low-latency Windows Desktop Duplication capture and WASAPI loopback audio
+- Point, Bilinear, and Line Blend scaling
+- Stable interlaced field alignment after start and mode changes
+- Optional full-height framebuffer mode for interlaced output
+- Timestamped performance and transport diagnostics
+- Safe stop/restart behavior and non-blocking host-name lookup
 
-The Windows Registered I/O sender drains completions without waiting in the render path. If a slow link still owns a registered video or audio buffer, MiSTerCast drops that complete batch instead of reusing the memory or growing an unbounded queue. The `[stream]` line reports `rio_outstanding`, `dropped_video`, `dropped_audio`, and `transport_errors`; sustained drops mean the selected network path cannot keep up. Direct Ethernet remains the recommended remedy.
+Direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
 
-Desktop Duplication uses one CPU-readable D3D11 staging texture for each capture size and pixel format instead of allocating a texture for every captured frame. A `[capture] Created reusable staging texture ...` entry appears at startup and whenever a source-size or display-format change requires a replacement; repeated entries without such a change indicate capture reinitialization.
+## Sampling
 
-The sender uses the Windows IP Helper API to verify that the local interface selected for the MiSTer route supports the configured 1500-byte IP packet before creating the RIO socket. Initialization fails with a specific error instead of underflowing the UDP payload size or fragmenting silently when that interface MTU is smaller. This validates the selected local interface, not every downstream hop; the socket still sets `IP_DONTFRAGMENT` so later path errors are reported by the transport. `[stream]` records `path_mtu`, `route_mtu`, and `route_if` alongside the RIO counters.
+Choose a filter from the GUI's **Sampling** menu or with CLI `--sampling`:
 
-The Linux sender's socket-rate shaper, adaptive interlaced delivery reserve, and PulseAudio prebuffer are not currently copied into this Windows path. Windows uses RIO completion ownership plus the existing FPGA-acknowledgement raster clock; direct-Ethernet frame-counter testing measured the same HDMI frame or one frame behind without additional sender buffering. Interlaced field choice uses the original Windows formula relative to the FPGA's reported `F1` and frame counters after a matching post-switch acknowledgement establishes the new raster phase. Until that acknowledgement arrives, fields alternate locally from protocol field zero so stale status from the previous mode cannot reverse the new stream. Direct-Ethernet validation should include repeated mode switches and deliberately skipped or stalled fields; see [issue #9](https://github.com/iequalshane/MiSTerCast/issues/9).
+| Mode | Best for |
+| --- | --- |
+| Point | Sharp, pixel-exact output. This is the default. |
+| Bilinear | General smoothing in both directions. |
+| Line Blend | Reducing vertical line shimmer while keeping horizontal pixels sharp. With 90° rotation, it blends source columns. |
 
-Interlaced modelines can optionally use a full-height progressive framebuffer through the GUI's **Full-height framebuffer for interlaced mode** checkbox or the CLI's `--progressive-framebuffer` switch. This sends Groovy_MiSTer protocol interlace mode `2`, always uses command field `0`, and lets the receiver derive both output fields from one complete RGB image. It is disabled by default because it roughly doubles video payload versus alternating half-height field buffers; 720x480i and 720x576i fit the current transport buffer, while oversized modes are rejected before streaming. Interlaced timing and ACK-based frame alignment are unchanged.
+Bilinear and Line Blend use more CPU than Point but do not buffer another frame. The filters are ported from [MiSTerCast-Linux](https://github.com/fjsj/MiSTerCast-Linux).
 
-## Building from source
+## Command-line diagnostics
 
-The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:
+`MiSTerCastCli.exe` is built beside the GUI and uses the same capture and streaming code. It requires a raw IPv4 target address.
 
-- Desktop development with C++
-- MSVC v143
-- A Windows 10 or Windows 11 SDK
-- MSBuild
-- The .NET Framework 4.7.2 targeting pack
-
-MTU route validation links `Iphlpapi.lib`, which is included with the Windows SDK above. It does not require another package, a newer SDK version, or a separate runtime dependency.
-
-Download LZ4 1.9.4 from https://github.com/lz4/lz4/releases/download/v1.9.4/lz4_win32_v1_9_4.zip and extract it to `External/lz4`. The Win32 build links the package's import library and copies `msys-lz4-1.dll` beside `MiSTerCast.exe` automatically.
-
-From a Visual Studio developer shell, build the release application with:
-
-```powershell
-msbuild FrontEnd\MiSTerCast.sln /m /t:Rebuild /p:Configuration=Release /p:Platform=x86
-```
-
-Run the native regression tests after building:
-
-```powershell
-Tests\Release\MiSTerCastTests.exe
-```
-
-## Command-line hardware diagnostics
-
-`MiSTerCastCli.exe` is built beside the GUI and runs the same Windows capture, audio, frame transform, and Groovy_MiSTer transport code for a fixed duration. It requires a raw IPv4 address so a diagnostic run cannot silently select Wi-Fi through host-name resolution.
-
-List the modeline presets:
+List available modelines:
 
 ```powershell
 FrontEnd\bin\Release\MiSTerCastCli.exe --list-modelines
 ```
 
-Run a 15-second direct-Ethernet interlaced test:
+Run a 15-second direct-Ethernet 480i test with a moving frame counter:
 
 ```powershell
-FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x480i NTSC (60Hz)" --duration 15 --test-pattern
+FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "720x480i NTSC (60Hz)" --duration 15 --test-pattern --no-audio
 ```
 
-Add `--switch-modeline "720x480i NTSC (60Hz)"` to change to another preset halfway through the run and exercise live mode switching, or `--cycles 3` to repeat stop/start three times in one process. `--test-pattern` temporarily covers the selected Windows display with a moving frame counter, then closes it when the run ends. Use `--progressive-framebuffer` to test protocol mode `2`, `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
+Add `--sampling line-blend` to test line filtering, `--cycles 3` to repeat stop/start, or `--switch-modeline "640x480i NTSC (60Hz)"` to switch modes halfway through each cycle. Use `--help` for every option.
 
-The direct-Ethernet phase-recovery stress run used during development can be repeated with:
+During a healthy 480i test, check that:
 
-```powershell
-FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "720x480i NTSC (60Hz)" --switch-modeline "640x480i NTSC (60Hz)" --duration 8 --cycles 3 --capture-width 720 --capture-height 480 --no-audio --skip-every 17 --stall-every 29 --stall-ms 40
-```
+- output rate stays near 60 fields/s;
+- phase changes from `local` to `locked` immediately after start or a mode switch;
+- `dropped_video`, `dropped_audio`, and `transport_errors` remain zero;
+- the moving counter is the same as HDMI or no more than one frame behind.
 
-## Known issues
-- Frames may be dropped or doubled due to sync with video signal.
-- Latency depends on the capture and network path; direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
-- Wi-Fi may drop whole video or audio batches when it cannot keep pace. Use the raw IPv4 address of the direct Ethernet adapter for stable low-latency streaming.
-- Nothing over 720x480i is recommended at the moment due to throughput on MiSTer. This will improve soon.
-- High refresh rate monitors are not supported due to frame times. Please change your monitor to ~60hz.
+Logs are written under `%LOCALAPPDATA%\MiSTerCast\Logs`. The CLI can use another folder with `--log-directory`.
 
-## Notes
-The current pre-defined modelines are just for testing. You can add your own in modelines.dat. Invalid timing order, odd-height interlaced modes, and modes whose RGB field exceeds the sender's fixed transport buffer are rejected instead of risking a corrupt frame.
-It's best to use a refresh that matches your PC for better sync.
-Find more modeline examples here: https://www.geocities.ws/podernixie/htpc/modes-en.html
+## Known limitations
+
+- Wi-Fi can fall behind badly enough to make the MiSTer core unresponsive. Use direct Ethernet for gaming and recovery.
+- The full-height interlaced framebuffer roughly doubles video bandwidth and is disabled by default.
+- Nothing above 720x480i is currently recommended because of MiSTer-side throughput.
+- A high-refresh Windows desktop is not supported well; match the desktop refresh to the output when possible.
+- The bundled modelines are starting points. You can add modes to `modelines.dat`.
+
+Build instructions, implementation notes, and the complete test procedure are in [AGENTS.md](AGENTS.md).

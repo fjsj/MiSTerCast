@@ -134,7 +134,7 @@ bool TickAudioCapture(bool writeOutput = true)
 
         const bool silence = (flags & AUDCLNT_BUFFERFLAGS_SILENT) != 0;
         // WASAPI is polled once per rendered frame, so forward the accumulated
-        // samples immediately instead of adding the Linux PulseAudio prebuffer.
+        // samples immediately so loopback capture does not add a prebuffer.
         // If rendering stalled long enough to exceed the protocol's 16-bit byte
         // count, retain the newest audio so latency cannot grow without bound.
         const size_t framesToKeep = std::min<size_t>(numFramesAvailable, mistercast::MaxAudioValuesPerCommand / 2);
