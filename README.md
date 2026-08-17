@@ -25,6 +25,8 @@ The Windows Registered I/O sender drains completions without waiting in the rend
 
 The Linux sender's socket-rate shaper, adaptive interlaced delivery reserve, and PulseAudio prebuffer are not currently copied into this Windows path. Windows uses RIO completion ownership plus the existing FPGA-acknowledgement raster clock; direct-Ethernet frame-counter testing measured the same HDMI frame or one frame behind without additional sender buffering. Interlaced field choice uses the original Windows formula relative to the FPGA's reported `F1` and frame counters after a matching post-switch acknowledgement establishes the new raster phase. Until that acknowledgement arrives, fields alternate locally from protocol field zero so stale status from the previous mode cannot reverse the new stream. Direct-Ethernet validation should include repeated mode switches and deliberately skipped or stalled fields; see [issue #9](https://github.com/iequalshane/MiSTerCast/issues/9).
 
+Interlaced modelines can optionally use a full-height progressive framebuffer through the GUI's **Full-height framebuffer for interlaced mode** checkbox or the CLI's `--progressive-framebuffer` switch. This sends Groovy_MiSTer protocol interlace mode `2`, always uses command field `0`, and lets the receiver derive both output fields from one complete RGB image. It is disabled by default because it roughly doubles video payload versus alternating half-height field buffers; 720x480i and 720x576i fit the current transport buffer, while oversized modes are rejected before streaming. Interlaced timing and ACK-based frame alignment are unchanged.
+
 ## Building from source
 
 The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools with:
@@ -65,7 +67,7 @@ Run a 15-second direct-Ethernet interlaced test:
 FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x480i NTSC (60Hz)" --duration 15 --test-pattern
 ```
 
-Add `--switch-modeline "720x480i NTSC (60Hz)"` to change to another preset halfway through the run and exercise live mode switching, or `--cycles 3` to repeat stop/start three times in one process. `--test-pattern` temporarily covers the selected Windows display with a moving frame counter, then closes it when the run ends. Use `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
+Add `--switch-modeline "720x480i NTSC (60Hz)"` to change to another preset halfway through the run and exercise live mode switching, or `--cycles 3` to repeat stop/start three times in one process. `--test-pattern` temporarily covers the selected Windows display with a moving frame counter, then closes it when the run ends. Use `--progressive-framebuffer` to test protocol mode `2`, `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
 
 The direct-Ethernet phase-recovery stress run used during development can be repeated with:
 

@@ -50,6 +50,7 @@ typedef struct nogpu_modeline
     uint16_t  vend;
     uint16_t  vtotal;
     bool  interlace;
+    bool  progressiveFramebuffer;
 } nogpu_modeline;
 
 std::atomic_bool shouldUpdateVideoMode = false;
@@ -254,9 +255,15 @@ void renderer_nogpu::draw()
     m_frame++;
 
     groovyMister.AlignFrame(m_frame, m_field);
+    if (m_current_mode.progressiveFramebuffer)
+        m_field = 0;
 
     char* fb = groovyMister.getPBufferBlit(m_field);
-    const size_t outputSize = Rgb24FrameSize(m_width, m_current_mode.vactive, m_current_mode.interlace);
+    const size_t outputSize = Rgb24FrameSize(
+        m_width,
+        m_current_mode.vactive,
+        m_current_mode.interlace,
+        m_current_mode.progressiveFramebuffer);
     if (!TransformBgraToRgb24(
         videoCaptures[drawIndex].buffer.data(),
         screenwidth,
@@ -265,6 +272,7 @@ void renderer_nogpu::draw()
         m_width,
         m_current_mode.vactive,
         m_current_mode.interlace,
+        m_current_mode.progressiveFramebuffer,
         static_cast<uint8_t>(m_field),
         videoCaptures[drawIndex].rotation,
         reinterpret_cast<uint8_t*>(fb),
@@ -457,11 +465,15 @@ bool renderer_nogpu::nogpu_switch_video_mode()
         mode.vbegin,
         mode.vend,
         mode.vtotal,
-        mode.interlace
+        mistercast::ProtocolInterlaceMode(mode.interlace, mode.progressiveFramebuffer)
     );
     m_phase_lock_reported = !mode.interlace;
     if (mode.interlace)
-        LogMessage("[phase] Using local field sequence until a post-switch blit is acknowledged.");
+    {
+        LogMessage(mode.progressiveFramebuffer
+            ? "[phase] Full-frame interlace uses field 0; waiting for a post-switch acknowledgement for frame alignment."
+            : "[phase] Using local field sequence until a post-switch blit is acknowledged.");
+    }
 
     return true;
 }
@@ -542,7 +554,10 @@ void renderer_nogpu::nogpu_log_diagnostics(
         if (captured == 0)
             m_diagnostics_capture_repeats++;
 
-        if (m_current_mode.interlace && m_diagnostics_last_field == static_cast<uint8_t>(m_field))
+        if (UsesInterlacedFieldBuffer(
+                m_current_mode.interlace,
+                m_current_mode.progressiveFramebuffer) &&
+            m_diagnostics_last_field == static_cast<uint8_t>(m_field))
             m_diagnostics_field_repeats++;
 
         if (m_diagnostics_last_frame + 1 != static_cast<uint32_t>(m_frame))
@@ -584,6 +599,7 @@ void renderer_nogpu::nogpu_log_diagnostics(
     message << std::fixed << std::setprecision(2)
         << "[stream] mode=" << m_current_mode.hactive << 'x' << m_current_mode.vactive
         << (m_current_mode.interlace ? 'i' : 'p')
+        << " framebuffer=" << (m_current_mode.progressiveFramebuffer ? "progressive" : "field")
         << " rate=" << (m_diagnostics_frames / elapsed_seconds)
         << " capture=" << (m_diagnostics_captures / elapsed_seconds)
         << " capture_repeat=" << m_diagnostics_capture_repeats

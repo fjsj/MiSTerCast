@@ -161,6 +161,13 @@
                                 <CheckBox Grid.Row="4" HorizontalAlignment="Center" x:Name="interlacedCheckBox" Checked="InterlacedCheckBox_Checked" Unchecked="InterlacedCheckBox_Checked"></CheckBox>
                             </Grid>
                         </Grid>
+                        <CheckBox x:Name="ProgressiveFramebufferCheckBox"
+                                  Margin="20,4,10,6"
+                                  IsChecked="False"
+                                  IsEnabled="False"
+                                  Checked="ProgressiveFramebufferCheckBox_Checked"
+                                  Unchecked="ProgressiveFramebufferCheckBox_Checked"
+                                  ToolTip="Send a full-height RGB framebuffer for interlaced modes. This may improve receiver stability but roughly doubles video bandwidth.">Full-height framebuffer for interlaced mode (higher bandwidth)</CheckBox>
                     </StackPanel>
                 </GroupBox>
             </Grid>
@@ -262,4 +269,3 @@
         </Grid>
     </Border>
 </Window>
-    

@@ -87,6 +87,19 @@ MISTERCASTLIB_API bool SetModeline(
     UINT16 vtotal,
     bool interlace);
 
+MISTERCASTLIB_API bool SetModelineEx(
+    double pclock,
+    UINT16 hactive,
+    UINT16 hbegin,
+    UINT16 hend,
+    UINT16 htotal,
+    UINT16 vactive,
+    UINT16 vbegin,
+    UINT16 vend,
+    UINT16 vtotal,
+    bool interlace,
+    bool progressiveFramebuffer);
+
 MISTERCASTLIB_API bool SetSource(
     UINT8 display,
     bool audio,

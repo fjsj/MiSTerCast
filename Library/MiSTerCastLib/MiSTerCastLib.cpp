@@ -175,6 +175,7 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
         selected_modeline.vend = 247;
         selected_modeline.vtotal = 262;
         selected_modeline.interlace = 0;
+        selected_modeline.progressiveFramebuffer = false;
     }
     
 
@@ -311,12 +312,32 @@ MISTERCASTLIB_API bool SetModeline(
     UINT16 vtotal,
     bool interlace)
 {
-    LogMessage("SetModeline called");
+    return SetModelineEx(
+        pclock, hactive, hbegin, hend, htotal,
+        vactive, vbegin, vend, vtotal, interlace, false);
+}
+
+MISTERCASTLIB_API bool SetModelineEx(
+    double pclock,
+    UINT16 hactive,
+    UINT16 hbegin,
+    UINT16 hend,
+    UINT16 htotal,
+    UINT16 vactive,
+    UINT16 vbegin,
+    UINT16 vend,
+    UINT16 vtotal,
+    bool interlace,
+    bool progressiveFramebuffer)
+{
+    LogMessage(progressiveFramebuffer
+        ? "SetModeline called with progressive interlace framebuffer."
+        : "SetModeline called");
     if (!mistercast::IsValidStreamModeline(
         pclock, hactive, hbegin, hend, htotal,
-        vactive, vbegin, vend, vtotal, interlace))
+        vactive, vbegin, vend, vtotal, interlace, progressiveFramebuffer))
     {
-        LogMessage("The modeline is invalid or its RGB field exceeds the streaming buffer capacity.", true);
+        LogMessage("The modeline is invalid or its selected RGB framebuffer exceeds the streaming buffer capacity.", true);
         return false;
     }
 
@@ -332,6 +353,7 @@ MISTERCASTLIB_API bool SetModeline(
         selected_modeline.vend = vend;
         selected_modeline.vtotal = vtotal;
         selected_modeline.interlace = interlace;
+        selected_modeline.progressiveFramebuffer = progressiveFramebuffer;
     }
 
     shouldUpdateVideoMode.store(true, std::memory_order_release);

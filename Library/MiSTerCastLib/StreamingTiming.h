@@ -21,7 +21,8 @@ inline bool IsValidStreamModeline(
     uint16_t verticalBegin,
     uint16_t verticalEnd,
     uint16_t verticalTotal,
-    bool interlaced) noexcept
+    bool interlaced,
+    bool progressiveFramebuffer = false) noexcept
 {
     if (!std::isfinite(pixelClockMHz) || pixelClockMHz <= 0.0 ||
         horizontalActive == 0 || verticalActive == 0 ||
@@ -29,14 +30,24 @@ inline bool IsValidStreamModeline(
         horizontalEnd > horizontalTotal ||
         verticalActive > verticalBegin || verticalBegin > verticalEnd ||
         verticalEnd > verticalTotal ||
-        (interlaced && (verticalActive & 1) != 0))
+        (interlaced && (verticalActive & 1) != 0) ||
+        (progressiveFramebuffer && !interlaced))
     {
         return false;
     }
 
-    const uint64_t outputLines = interlaced ? verticalActive / 2 : verticalActive;
+    const uint64_t outputLines = interlaced && !progressiveFramebuffer
+        ? verticalActive / 2
+        : verticalActive;
     const uint64_t frameBytes = static_cast<uint64_t>(horizontalActive) * outputLines * 3;
     return frameBytes <= MaxStreamBufferBytes;
+}
+
+inline uint8_t ProtocolInterlaceMode(bool interlaced, bool progressiveFramebuffer) noexcept
+{
+    if (!interlaced)
+        return 0;
+    return progressiveFramebuffer ? 2 : 1;
 }
 
 inline uint32_t CounterTicksTo100ns(uint64_t ticks, uint64_t ticksPerSecond) noexcept

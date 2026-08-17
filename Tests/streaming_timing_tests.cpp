@@ -21,6 +21,7 @@ int RunStreamingTimingTests()
     using mistercast::FieldPeriodMilliseconds;
     using mistercast::LinePeriodMilliseconds;
     using mistercast::IsValidStreamModeline;
+    using mistercast::ProtocolInterlaceMode;
     using mistercast::RequestedSyncLine;
 
     Check(CounterTicksTo100ns(10000000, 10000000) == 10000000);
@@ -49,6 +50,12 @@ int RunStreamingTimingTests()
     Check(!IsValidStreamModeline(13.846, 720, 700, 809, 880, 480, 488, 494, 525, true));
     Check(!IsValidStreamModeline(13.846, 720, 744, 809, 880, 481, 488, 494, 525, true));
     Check(!IsValidStreamModeline(40.0, 1280, 1300, 1320, 1400, 720, 725, 730, 750, false));
+    Check(IsValidStreamModeline(13.846, 720, 744, 809, 880, 480, 488, 494, 525, true, true));
+    Check(!IsValidStreamModeline(13.846, 720, 744, 809, 880, 480, 488, 494, 525, false, true));
+    Check(!IsValidStreamModeline(40.0, 1280, 1300, 1320, 1400, 720, 725, 730, 750, true, true));
+    Check(ProtocolInterlaceMode(false, false) == 0);
+    Check(ProtocolInterlaceMode(true, false) == 1);
+    Check(ProtocolInterlaceMode(true, true) == 2);
 
     return failures;
 }

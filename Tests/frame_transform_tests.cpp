@@ -46,7 +46,7 @@ void CheckRotation(Rotation rotation, uint32_t outputWidth, uint32_t outputHeigh
     const auto frame = GrayFrame(2, 3, {0, 1, 2, 3, 4, 5});
     std::vector<uint8_t> rgb(Rgb24FrameSize(outputWidth, outputHeight, false));
     CHECK(TransformBgraToRgb24(
-        frame.data(), 2, 3, 8, outputWidth, outputHeight, false, 0, rotation, rgb.data(), rgb.size()));
+        frame.data(), 2, 3, 8, outputWidth, outputHeight, false, false, 0, rotation, rgb.data(), rgb.size()));
     CHECK(PerPixel(rgb) == expected);
 }
 
@@ -65,12 +65,19 @@ void InterlaceTests()
     std::vector<uint8_t> rgb(Rgb24FrameSize(2, 4, true));
 
     CHECK(TransformBgraToRgb24(
-        frame.data(), 2, 4, 8, 2, 4, true, 0, Rotation::None, rgb.data(), rgb.size()));
+        frame.data(), 2, 4, 8, 2, 4, true, false, 0, Rotation::None, rgb.data(), rgb.size()));
     CHECK(PerPixel(rgb) == std::vector<uint8_t>({2, 3, 6, 7}));
 
     CHECK(TransformBgraToRgb24(
-        frame.data(), 2, 4, 8, 2, 4, true, 1, Rotation::None, rgb.data(), rgb.size()));
+        frame.data(), 2, 4, 8, 2, 4, true, false, 1, Rotation::None, rgb.data(), rgb.size()));
     CHECK(PerPixel(rgb) == std::vector<uint8_t>({0, 1, 4, 5}));
+
+    std::vector<uint8_t> progressiveRgb(Rgb24FrameSize(2, 4, true, true));
+    CHECK(progressiveRgb.size() == 24);
+    CHECK(TransformBgraToRgb24(
+        frame.data(), 2, 4, 8, 2, 4, true, true, 1,
+        Rotation::None, progressiveRgb.data(), progressiveRgb.size()));
+    CHECK(PerPixel(progressiveRgb) == std::vector<uint8_t>({0, 1, 2, 3, 4, 5, 6, 7}));
 }
 
 void BoundsAndChannelTests()
@@ -79,14 +86,14 @@ void BoundsAndChannelTests()
     const size_t required = Rgb24FrameSize(1, 1, false);
     std::vector<uint8_t> guarded(required + 4, 0xcd);
     CHECK(TransformBgraToRgb24(
-        frame.data(), 1, 1, 4, 1, 1, false, 0, Rotation::None, guarded.data(), required));
+        frame.data(), 1, 1, 4, 1, 1, false, false, 0, Rotation::None, guarded.data(), required));
     CHECK(guarded[0] == 7 && guarded[1] == 8 && guarded[2] == 9);
     CHECK(guarded[required] == 0xcd && guarded.back() == 0xcd);
 
     CHECK(!TransformBgraToRgb24(
-        frame.data(), 1, 1, 4, 1, 1, false, 0, Rotation::None, guarded.data(), required - 1));
+        frame.data(), 1, 1, 4, 1, 1, false, false, 0, Rotation::None, guarded.data(), required - 1));
     CHECK(!TransformBgraToRgb24(
-        frame.data(), 1, 1, 3, 1, 1, false, 0, Rotation::None, guarded.data(), required));
+        frame.data(), 1, 1, 3, 1, 1, false, false, 0, Rotation::None, guarded.data(), required));
     CHECK(Rgb24FrameSize(1, 1, true) == 0);
 }
 }

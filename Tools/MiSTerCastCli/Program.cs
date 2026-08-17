@@ -37,6 +37,7 @@ namespace MiSTerCast
             public int StallEvery;
             public int StallMilliseconds;
             public string LogDirectory;
+            public bool ProgressiveFramebuffer;
         }
 
         private sealed class Modeline
@@ -236,6 +237,11 @@ namespace MiSTerCast
                 if (switched == null)
                     throw new ArgumentException("Unknown switch modeline: " + options.SwitchModelineName);
             }
+            if (options.ProgressiveFramebuffer &&
+                (!selected.Interlace || (switched != null && !switched.Interlace)))
+            {
+                throw new ArgumentException("--progressive-framebuffer requires every selected modeline to be interlaced.");
+            }
 
             ushort captureWidth = options.CaptureWidth ?? selected.HActive;
             ushort captureHeight = options.CaptureHeight ?? selected.VActive;
@@ -263,7 +269,7 @@ namespace MiSTerCast
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9} skip_every={10} stall_every={11} stall_ms={12}",
+                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9} skip_every={10} stall_every={11} stall_ms={12} progressive_framebuffer={13}",
                     address,
                     selected.Name,
                     switched == null ? "" : switched.Name,
@@ -276,7 +282,8 @@ namespace MiSTerCast
                     options.TestPattern,
                     options.SkipEvery,
                     options.StallEvery,
-                    options.StallMilliseconds), false);
+                    options.StallMilliseconds,
+                    options.ProgressiveFramebuffer), false);
 
                 if (options.TestPattern)
                 {
@@ -301,7 +308,7 @@ namespace MiSTerCast
                     return 7;
                 }
 
-                if (!ApplyModeline(selected))
+                if (!ApplyModeline(selected, options.ProgressiveFramebuffer))
                 {
                     QueueLog("Native modeline validation failed.", true);
                     return 6;
@@ -323,7 +330,7 @@ namespace MiSTerCast
                     if (options.Cycles > 1)
                         QueueLog(String.Format(CultureInfo.InvariantCulture, "Starting stream cycle {0}/{1}.", cycle, options.Cycles), false);
 
-                    if (!ApplyModeline(selected))
+                    if (!ApplyModeline(selected, options.ProgressiveFramebuffer))
                     {
                         QueueLog("Native modeline validation failed.", true);
                         return 6;
@@ -352,7 +359,7 @@ namespace MiSTerCast
                         if (!modeSwitched && switched != null && DateTime.UtcNow >= switchAt)
                         {
                             QueueLog("Switching live stream to modeline \"" + switched.Name + "\".", false);
-                            if (!ApplyModeline(switched))
+                            if (!ApplyModeline(switched, options.ProgressiveFramebuffer))
                             {
                                 QueueLog("Native switch-modeline validation failed.", true);
                                 return 6;
@@ -400,9 +407,9 @@ namespace MiSTerCast
         {
         }
 
-        private static bool ApplyModeline(Modeline modeline)
+        private static bool ApplyModeline(Modeline modeline, bool progressiveFramebuffer)
         {
-            return MiSTerCastInterop.SetModeline(
+            return MiSTerCastInterop.SetModelineEx(
                 modeline.PixelClock,
                 modeline.HActive,
                 modeline.HBegin,
@@ -412,7 +419,8 @@ namespace MiSTerCast
                 modeline.VBegin,
                 modeline.VEnd,
                 modeline.VTotal,
-                modeline.Interlace);
+                modeline.Interlace,
+                progressiveFramebuffer);
         }
 
         private static void QueueLog(string message, bool error)
@@ -467,6 +475,9 @@ namespace MiSTerCast
                     break;
                 case "--test-pattern":
                     options.TestPattern = true;
+                    break;
+                case "--progressive-framebuffer":
+                    options.ProgressiveFramebuffer = true;
                     break;
                 case "--target":
                     options.Target = NextValue(args, ref index, argument);
@@ -611,6 +622,7 @@ namespace MiSTerCast
             Console.WriteLine("  --capture-height <px>   Capture height (default: modeline active height)");
             Console.WriteLine("  --no-audio              Disable loopback audio");
             Console.WriteLine("  --test-pattern          Show a full-screen moving frame counter on the captured display");
+            Console.WriteLine("  --progressive-framebuffer Send full-height RGB for interlaced modes (higher bandwidth)");
             Console.WriteLine("  --skip-every <fields>   Omit each Nth blit for phase-recovery diagnostics");
             Console.WriteLine("  --stall-every <fields>  Stall before each Nth blit (requires --stall-ms)");
             Console.WriteLine("  --stall-ms <ms>         Diagnostic stall duration (requires --stall-every)");

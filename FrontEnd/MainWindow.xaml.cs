@@ -238,7 +238,7 @@ namespace MiSTerCast
 
         #region Settings
 
-        const int SettingsVersion = 1;
+        const int SettingsVersion = 2;
 
         private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
@@ -276,6 +276,7 @@ namespace MiSTerCast
                                 sw.WriteLine(vendTextBox.Text);
                                 sw.WriteLine(vtotalTextBox.Text);
                                 sw.WriteLine(interlacedCheckBox.IsChecked.Value ? 1 : 0);
+                                sw.WriteLine(ProgressiveFramebufferCheckBox.IsChecked.Value ? 1 : 0);
 
                                 sw.WriteLine(CaptureSourceBox.SelectedIndex);
                                 sw.WriteLine(RotateComboBox.SelectedIndex);
@@ -356,6 +357,7 @@ namespace MiSTerCast
             vendTextBox.Text = sr.ReadLine();
             vtotalTextBox.Text = sr.ReadLine();
             interlacedCheckBox.IsChecked = sr.ReadLine() == "1" ? true : false;
+            ProgressiveFramebufferCheckBox.IsChecked = settingsVersion >= 2 && sr.ReadLine() == "1";
 
             CaptureSourceBox.SelectedIndex = Math.Min(int.Parse(sr.ReadLine()), CaptureSourceBox.Items.Count - 1);
             RotateComboBox.SelectedIndex = Math.Min(int.Parse(sr.ReadLine()), RotateComboBox.Items.Count - 1);
@@ -620,7 +622,7 @@ namespace MiSTerCast
 
             if (isInitialized && currentModeLine.pclock > 0 && currentModeLine.hactive > 0 && currentModeLine.vactive > 0)
             {
-                if (!MiSTerCastInterop.SetModeline(
+                if (!MiSTerCastInterop.SetModelineEx(
                     currentModeLine.pclock,
                     currentModeLine.hactive,
                     currentModeLine.hbegin,
@@ -630,7 +632,8 @@ namespace MiSTerCast
                     currentModeLine.vbegin,
                     currentModeLine.vend,
                     currentModeLine.vtotal,
-                    currentModeLine.interlace))
+                    currentModeLine.interlace,
+                    currentModeLine.interlace && ProgressiveFramebufferCheckBox.IsChecked == true))
                 {
                     return;
                 }
@@ -782,6 +785,19 @@ namespace MiSTerCast
         }
 
         private void InterlacedCheckBox_Checked(object sender, RoutedEventArgs e)
+        {
+            bool interlaced = interlacedCheckBox.IsChecked == true;
+            ProgressiveFramebufferCheckBox.IsEnabled = interlaced;
+            if (!interlaced && ProgressiveFramebufferCheckBox.IsChecked == true)
+            {
+                ignoreModelineChange = true;
+                ProgressiveFramebufferCheckBox.IsChecked = false;
+                ignoreModelineChange = false;
+            }
+            OnManualModelineChange();
+        }
+
+        private void ProgressiveFramebufferCheckBox_Checked(object sender, RoutedEventArgs e)
         {
             OnManualModelineChange();
         }

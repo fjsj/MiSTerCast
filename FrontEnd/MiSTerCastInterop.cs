@@ -59,6 +59,20 @@ namespace MiSTerCast
             UInt16 vtotal,
             bool interlace);
 
+        [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetModelineEx", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool SetModelineEx(
+            Double pclock,
+            UInt16 hactive,
+            UInt16 hbegin,
+            UInt16 hend,
+            UInt16 htotal,
+            UInt16 vactive,
+            UInt16 vbegin,
+            UInt16 vend,
+            UInt16 vtotal,
+            bool interlace,
+            bool progressiveFramebuffer);
+
         [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetSource", CallingConvention = CallingConvention.Cdecl)]
         public static extern bool SetSource(
             byte display,
