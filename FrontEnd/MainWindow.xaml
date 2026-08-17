@@ -5,7 +5,7 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:MiSTerCast"
         mc:Ignorable="d"
-        Title="MiSTerCast 1.02" Height="620" Width="680"
+        Title="MiSTerCast 1.02" Height="660" Width="680"
         Activated="Window_Activated"
         Closing="MainWindow_Closing"
         Closed="Window_Closed">
@@ -52,8 +52,8 @@
                 <GroupBox Header="Modeline Presets" Grid.Column="0">
                     <Grid>
                         <Grid.RowDefinitions>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <ComboBox x:Name="ModelinePresetsBox" Grid.Row="0" Margin="10 10 10 10" Width="Auto" SelectedIndex="0" SelectionChanged="ModelinePresetsBox_SelectionChanged">
                             <ComboBoxItem>320x240 NTSC (60Hz)</ComboBoxItem>
@@ -167,7 +167,7 @@
                                   IsEnabled="False"
                                   Checked="ProgressiveFramebufferCheckBox_Checked"
                                   Unchecked="ProgressiveFramebufferCheckBox_Checked"
-                                  ToolTip="Send a full-height RGB framebuffer for interlaced modes. This may improve receiver stability but roughly doubles video bandwidth.">Full-height framebuffer for interlaced mode (higher bandwidth)</CheckBox>
+                                  ToolTip="Send a full-height RGB framebuffer for interlaced modes. This may improve receiver stability but roughly doubles video bandwidth.">Full-height framebuffer (higher bandwidth)</CheckBox>
                     </StackPanel>
                 </GroupBox>
             </Grid>

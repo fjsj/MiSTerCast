@@ -433,7 +433,9 @@ namespace MiSTerCast
             vendTextBox.Text = sr.ReadLine();
             vtotalTextBox.Text = sr.ReadLine();
             interlacedCheckBox.IsChecked = sr.ReadLine() == "1" ? true : false;
-            ProgressiveFramebufferCheckBox.IsChecked = settingsVersion >= 2 && sr.ReadLine() == "1";
+            bool savedProgressiveFramebuffer = settingsVersion >= 2 && sr.ReadLine() == "1";
+            ProgressiveFramebufferCheckBox.IsChecked =
+                interlacedCheckBox.IsChecked == true && savedProgressiveFramebuffer;
 
             CaptureSourceBox.SelectedIndex = Math.Min(int.Parse(sr.ReadLine()), CaptureSourceBox.Items.Count - 1);
             RotateComboBox.SelectedIndex = Math.Min(int.Parse(sr.ReadLine()), RotateComboBox.Items.Count - 1);
