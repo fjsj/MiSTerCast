@@ -2,6 +2,7 @@
 #define __GROOVYMISTER_H__
 
 #include <inttypes.h>
+#include <string>
 #include "InterlacePhase.h"
 
 #ifdef _WIN32
@@ -75,6 +76,9 @@ typedef struct groovyMisterDiagnostics {
 	uint32_t droppedVideoBatches;
 	uint32_t droppedAudioBatches;
 	uint32_t transportErrors;
+	uint32_t requestedPathMtu;
+	uint32_t routeInterfaceMtu;
+	uint32_t routeInterfaceIndex;
 	uint8_t connected;
 	uint8_t haveFpgaStatus;
 	uint8_t interlacePhaseValid;
@@ -148,6 +152,7 @@ class GroovyMister
 
 	void setVerbose(uint8_t sev);
 	const char* getVersion();
+	const std::string& getLastError() const noexcept;
 	groovyMisterDiagnostics getDiagnostics() const noexcept;
 
  private:
@@ -228,6 +233,10 @@ class GroovyMister
 	uint32_t m_droppedVideoBatches;
 	uint32_t m_droppedAudioBatches;
 	uint32_t m_transportErrors;
+	uint32_t m_requestedPathMtu;
+	uint32_t m_routeInterfaceMtu;
+	uint32_t m_routeInterfaceIndex;
+	std::string m_lastError;
 
 	char *AllocateBufferSpace(const DWORD bufSize, const DWORD bufCount, DWORD& totalBufferSize, DWORD& totalBufferCount);
 	bool Send(void *cmd, int cmdSize);

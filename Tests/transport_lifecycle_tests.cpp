@@ -248,6 +248,14 @@ void CheckIncompressibleInterlacedFieldFallback()
 
 int RunTransportLifecycleTests()
 {
+    // Reject an undersized datagram path before creating sockets, and retain a
+    // user-facing reason that the GUI and CLI can report.
+    {
+        GroovyMister transport;
+        Check(transport.CmdInit("127.0.0.1", 65534, 1, 0, 0, 0, 1499) == -1);
+        Check(transport.getLastError().find("MTU") != std::string::npos);
+    }
+
     // INIT with no endpoint must time out, cancel its pending RIO operations,
     // and tolerate explicit plus destructor cleanup without touching resources twice.
     {

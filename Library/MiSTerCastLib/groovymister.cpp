@@ -1,6 +1,7 @@
 #include "pch.h"
 #include "groovymister.h"
 #include "GroovyProtocol.h"
+#include "NetworkMtu.h"
 #include "StreamingTiming.h"
 
 #include <stdint.h>
@@ -22,6 +23,10 @@
 #endif
 
 #define USE_RIO 1
+
+#ifdef _WIN32
+#pragma comment(lib, "Iphlpapi.lib")
+#endif
 
 #define LOG(sev,fmt, ...) do {\
 					if (sev <= m_verbose) {\
@@ -119,6 +124,9 @@ GroovyMister::GroovyMister()
 	m_droppedVideoBatches = 0;
 	m_droppedAudioBatches = 0;
 	m_transportErrors = 0;
+	m_requestedPathMtu = 0;
+	m_routeInterfaceMtu = 0;
+	m_routeInterfaceIndex = 0;
 
 #ifdef _WIN32
 	m_sockFD = INVALID_SOCKET;
@@ -377,6 +385,11 @@ const char* GroovyMister::getVersion()
 	return &GROOVYMISTER_VERSION[0];
 }
 
+const std::string& GroovyMister::getLastError() const noexcept
+{
+	return m_lastError;
+}
+
 groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
 {
 	groovyMisterDiagnostics diagnostics = {};
@@ -391,6 +404,9 @@ groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
 	diagnostics.droppedVideoBatches = m_droppedVideoBatches;
 	diagnostics.droppedAudioBatches = m_droppedAudioBatches;
 	diagnostics.transportErrors = m_transportErrors;
+	diagnostics.requestedPathMtu = m_requestedPathMtu;
+	diagnostics.routeInterfaceMtu = m_routeInterfaceMtu;
+	diagnostics.routeInterfaceIndex = m_routeInterfaceIndex;
 	diagnostics.connected = m_isConnected;
 	diagnostics.haveFpgaStatus = m_haveFpgaStatus ? 1 : 0;
 	diagnostics.interlacePhaseValid = m_interlacePhase.IsValid() ? 1 : 0;
@@ -405,7 +421,18 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 	m_droppedVideoBatches = 0;
 	m_droppedAudioBatches = 0;
 	m_transportErrors = 0;
-	m_mtu = (!mtu) ? BUFFER_MTU : mtu - MTU_HEADER;
+	m_requestedPathMtu = mistercast::ResolvePathMtu(mtu);
+	m_routeInterfaceMtu = 0;
+	m_routeInterfaceIndex = 0;
+	m_lastError.clear();
+	if (!mistercast::IsSupportedPathMtu(mtu))
+	{
+		m_lastError = "Unsupported path MTU " + std::to_string(m_requestedPathMtu) +
+			"; the Windows RIO transport requires at least 1500 bytes.";
+		LOG(0, "[MiSTer] Unsupported MTU %u; this transport requires at least 1500 bytes\n", mtu);
+		return -1;
+	}
+	m_mtu = static_cast<uint16_t>(mistercast::UdpPayloadBytes(mtu));
 
 	// Set server
 	m_serverAddr.sin_family = AF_INET;
@@ -414,6 +441,42 @@ int GroovyMister::CmdInit(const char* misterHost, uint16_t misterPort, int lz4Fr
 
 	// Set socket
 #ifdef _WIN32
+	DWORD interfaceIndex = 0;
+	DWORD routeResult = GetBestInterfaceEx(
+		reinterpret_cast<sockaddr*>(&m_serverAddr), &interfaceIndex);
+	if (routeResult != NO_ERROR)
+	{
+		m_lastError = "Unable to determine the route MTU for " +
+			std::string(misterHost) + " (Windows error " + std::to_string(routeResult) + ").";
+		LOG(0, "[MiSTer] Unable to determine the target route MTU: %lu\n", routeResult);
+		return -1;
+	}
+
+	MIB_IF_ROW2 interfaceRow = {};
+	interfaceRow.InterfaceIndex = interfaceIndex;
+	routeResult = GetIfEntry2(&interfaceRow);
+	if (routeResult != NO_ERROR)
+	{
+		m_lastError = "Unable to read MTU for route interface " +
+			std::to_string(interfaceIndex) + " (Windows error " + std::to_string(routeResult) + ").";
+		LOG(0, "[MiSTer] Unable to read interface %lu MTU: %lu\n", interfaceIndex, routeResult);
+		return -1;
+	}
+
+	m_routeInterfaceIndex = interfaceIndex;
+	m_routeInterfaceMtu = interfaceRow.Mtu;
+	if (!mistercast::InterfaceSupportsPathMtu(mtu, interfaceRow.Mtu))
+	{
+		m_lastError = "Route interface " + std::to_string(interfaceIndex) +
+			" has MTU " + std::to_string(interfaceRow.Mtu) +
+			", smaller than the requested " + std::to_string(m_requestedPathMtu) + ".";
+		LOG(0, "[MiSTer] Route interface %lu MTU %lu is smaller than requested MTU %u\n",
+			interfaceIndex, interfaceRow.Mtu, m_requestedPathMtu);
+		return -1;
+	}
+	LOG(0, "[MiSTer] Route interface %lu MTU %lu supports requested MTU %u\n",
+		interfaceIndex, interfaceRow.Mtu, m_requestedPathMtu);
+
 	WSADATA wsd;
 	int rc;
 

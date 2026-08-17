@@ -21,6 +21,9 @@
     <ClInclude Include="AudioProcessing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CaptureResources.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="DiagnosticFaults.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -28,6 +31,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="InterlacePhase.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="NetworkMtu.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="MiSTerCastLib.h">

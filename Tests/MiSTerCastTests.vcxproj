@@ -81,6 +81,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="audio_processing_tests.cpp" />
+    <ClCompile Include="capture_resource_tests.cpp" />
     <ClCompile Include="diagnostic_fault_tests.cpp" />
     <ClCompile Include="frame_transform_tests.cpp" />
     <ClCompile Include="groovy_protocol_tests.cpp" />

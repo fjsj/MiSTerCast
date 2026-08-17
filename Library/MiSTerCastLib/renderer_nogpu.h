@@ -423,7 +423,10 @@ bool renderer_nogpu::nogpu_init()
     }
     else
     {
-        LogMessage("Groovy MiSTer API failed to initialize!");
+        const std::string& detail = groovyMister.getLastError();
+        LogMessage(detail.empty()
+            ? "Groovy MiSTer API failed to initialize."
+            : "Groovy MiSTer API failed to initialize: " + detail, true);
         return false;
     }
 }
@@ -628,6 +631,9 @@ void renderer_nogpu::nogpu_log_diagnostics(
         << " emulation_ms=" << (transport.emulationTime / 10000.0)
         << " target_ms=" << (transport.frameTime / 10000.0)
         << " sync_line=" << m_vsync_scanline
+        << " path_mtu=" << transport.requestedPathMtu
+        << " route_mtu=" << transport.routeInterfaceMtu
+        << " route_if=" << transport.routeInterfaceIndex
         << " rio_outstanding=" << transport.outstandingSends
         << " dropped_video=" << transport.droppedVideoBatches
         << " dropped_audio=" << transport.droppedAudioBatches

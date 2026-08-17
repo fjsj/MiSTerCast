@@ -23,6 +23,10 @@ For repeatable phase-recovery tests, the CLI accepts `--cycles`, `--switch-model
 
 The Windows Registered I/O sender drains completions without waiting in the render path. If a slow link still owns a registered video or audio buffer, MiSTerCast drops that complete batch instead of reusing the memory or growing an unbounded queue. The `[stream]` line reports `rio_outstanding`, `dropped_video`, `dropped_audio`, and `transport_errors`; sustained drops mean the selected network path cannot keep up. Direct Ethernet remains the recommended remedy.
 
+Desktop Duplication uses one CPU-readable D3D11 staging texture for each capture size and pixel format instead of allocating a texture for every captured frame. A `[capture] Created reusable staging texture ...` entry appears at startup and whenever a source-size or display-format change requires a replacement; repeated entries without such a change indicate capture reinitialization.
+
+The sender uses the Windows IP Helper API to verify that the local interface selected for the MiSTer route supports the configured 1500-byte IP packet before creating the RIO socket. Initialization fails with a specific error instead of underflowing the UDP payload size or fragmenting silently when that interface MTU is smaller. This validates the selected local interface, not every downstream hop; the socket still sets `IP_DONTFRAGMENT` so later path errors are reported by the transport. `[stream]` records `path_mtu`, `route_mtu`, and `route_if` alongside the RIO counters.
+
 The Linux sender's socket-rate shaper, adaptive interlaced delivery reserve, and PulseAudio prebuffer are not currently copied into this Windows path. Windows uses RIO completion ownership plus the existing FPGA-acknowledgement raster clock; direct-Ethernet frame-counter testing measured the same HDMI frame or one frame behind without additional sender buffering. Interlaced field choice uses the original Windows formula relative to the FPGA's reported `F1` and frame counters after a matching post-switch acknowledgement establishes the new raster phase. Until that acknowledgement arrives, fields alternate locally from protocol field zero so stale status from the previous mode cannot reverse the new stream. Direct-Ethernet validation should include repeated mode switches and deliberately skipped or stalled fields; see [issue #9](https://github.com/iequalshane/MiSTerCast/issues/9).
 
 Interlaced modelines can optionally use a full-height progressive framebuffer through the GUI's **Full-height framebuffer for interlaced mode** checkbox or the CLI's `--progressive-framebuffer` switch. This sends Groovy_MiSTer protocol interlace mode `2`, always uses command field `0`, and lets the receiver derive both output fields from one complete RGB image. It is disabled by default because it roughly doubles video payload versus alternating half-height field buffers; 720x480i and 720x576i fit the current transport buffer, while oversized modes are rejected before streaming. Interlaced timing and ACK-based frame alignment are unchanged.
@@ -36,6 +40,8 @@ The supported build uses Visual Studio 2022 or Visual Studio 2022 Build Tools wi
 - A Windows 10 or Windows 11 SDK
 - MSBuild
 - The .NET Framework 4.7.2 targeting pack
+
+MTU route validation links `Iphlpapi.lib`, which is included with the Windows SDK above. It does not require another package, a newer SDK version, or a separate runtime dependency.
 
 Download LZ4 1.9.4 from https://github.com/lz4/lz4/releases/download/v1.9.4/lz4_win32_v1_9_4.zip and extract it to `External/lz4`. The Win32 build links the package's import library and copies `msys-lz4-1.dll` beside `MiSTerCast.exe` automatically.
 

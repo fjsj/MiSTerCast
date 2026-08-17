@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CaptureResources.h"
 #include "SourceOptionsState.h"
 
 #define BUFFER_COUNT 3
@@ -20,8 +21,41 @@ int    displayIndex = 0;
 ID3D11Device*           d3dDevice = nullptr;
 ID3D11DeviceContext*    d3dDeviceContext = nullptr;
 IDXGIOutputDuplication* desktopDuplication = nullptr;
+ID3D11Texture2D*       stagingTexture = nullptr;
+mistercast::StagingTextureSpec stagingTextureSpec = {};
+bool                    haveStagingTextureSpec = false;
 bool                    haveFrameLock = false;
 capture_image_function  captureFunction;
+
+bool EnsureStagingTexture(const D3D11_TEXTURE2D_DESC& desc)
+{
+    const mistercast::StagingTextureSpec requested = {
+        desc.Width,
+        desc.Height,
+        static_cast<uint32_t>(desc.Format),
+    };
+    if (stagingTexture != nullptr && haveStagingTextureSpec &&
+        mistercast::SameStagingTexture(stagingTextureSpec, requested))
+    {
+        return true;
+    }
+
+    SAFE_RELEASE(stagingTexture);
+    haveStagingTextureSpec = false;
+    const HRESULT hr = d3dDevice->CreateTexture2D(&desc, nullptr, &stagingTexture);
+    if (FAILED(hr))
+    {
+        LogMessage("D3DDevice->CreateTexture2D failed: " + std::to_string(hr), true);
+        return false;
+    }
+
+    stagingTextureSpec = requested;
+    haveStagingTextureSpec = true;
+    LogMessage("[capture] Created reusable staging texture " +
+        std::to_string(desc.Width) + "x" + std::to_string(desc.Height) + ".");
+    return true;
+}
+
 bool InitializeVideoCapture(int outputNumber, capture_image_function fnCapture)
 {
     displayIndex = outputNumber;
@@ -117,10 +151,13 @@ bool InitializeVideoCapture(int outputNumber, capture_image_function fnCapture)
 
 void CleanupVideoCapture()
 {
+    SAFE_RELEASE(stagingTexture);
     SAFE_RELEASE(desktopDuplication);
     SAFE_RELEASE(d3dDeviceContext);
     SAFE_RELEASE(d3dDevice);
     haveFrameLock = false;
+    haveStagingTextureSpec = false;
+    stagingTextureSpec = {};
 }
 
 bool TickVideoCapture()
@@ -187,10 +224,14 @@ bool TickVideoCapture()
 
     D3D11_TEXTURE2D_DESC desc;
     gpuTex->GetDesc(&desc);
-    desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE | D3D11_CPU_ACCESS_READ;
+    desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
     desc.Usage = D3D11_USAGE_STAGING;
     desc.BindFlags = 0;
     desc.MiscFlags = 0;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.SampleDesc.Count = 1;
+    desc.SampleDesc.Quality = 0;
 
     switch (currentSourceOptions.cropmode)
     {
@@ -286,9 +327,11 @@ bool TickVideoCapture()
     desc.Width = width;
     desc.Height = height;
 
-    ID3D11Texture2D* cpuTex = nullptr;
-    hr = d3dDevice->CreateTexture2D(&desc, nullptr, &cpuTex);
-    EXIT_ON_ERROR(hr, "D3DDevice->CreateTexture2D failed");
+    if (!EnsureStagingTexture(desc))
+    {
+        gpuTex->Release();
+        return false;
+    }
 
     D3D11_BOX sourceRegion;
     sourceRegion.left = xoffset;
@@ -299,7 +342,7 @@ bool TickVideoCapture()
     sourceRegion.back = 1;
 
     d3dDeviceContext->CopySubresourceRegion(
-        cpuTex,
+        stagingTexture,
         0, // sub resource
         0, //x
         0, //y
@@ -310,8 +353,13 @@ bool TickVideoCapture()
 
     unsigned int nextIndex = (lastVideoCaptureIndex + 1) % BUFFER_COUNT;
     D3D11_MAPPED_SUBRESOURCE sr;
-    hr = d3dDeviceContext->Map(cpuTex, 0, D3D11_MAP_READ, 0, &sr);
-    EXIT_ON_ERROR(hr, "D3DDeviceContext->Map failed");
+    hr = d3dDeviceContext->Map(stagingTexture, 0, D3D11_MAP_READ, 0, &sr);
+    if (FAILED(hr))
+    {
+        LogMessage("D3DDeviceContext->Map failed: " + std::to_string(hr), true);
+        gpuTex->Release();
+        return false;
+    }
 
     if (videoCaptures[nextIndex].width != width || videoCaptures[nextIndex].height != height)
     {
@@ -323,7 +371,7 @@ bool TickVideoCapture()
 
     for (int y = 0; y < (int)height; y++) // TODO: Can this be improved?
         memcpy(videoCaptures[nextIndex].buffer.data() + y * width * 4, (uint8_t*)sr.pData + sr.RowPitch * y, width * 4);
-    d3dDeviceContext->Unmap(cpuTex, 0);
+    d3dDeviceContext->Unmap(stagingTexture, 0);
 
     if (currentSourceOptions.preview)
         captureFunction(width, height, videoCaptures[nextIndex].buffer.data());
@@ -331,7 +379,6 @@ bool TickVideoCapture()
     lastVideoCaptureIndex = nextIndex;
     videoCaptureSequence.fetch_add(1, std::memory_order_relaxed);
 
-    cpuTex->Release();
     gpuTex->Release();
 
     return ok;
