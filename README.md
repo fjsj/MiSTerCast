@@ -21,10 +21,10 @@ Useful Groovy_MiSTer setup references:
 
 ## New Features
 
-- Point, Bilinear, and Line Blend sampling
+- **Single-window capture**
+- **Point, Bilinear, and Line Blend sampling**
 - Optional full-height framebuffer mode for interlaced output
 - Safe stop/restart behavior and non-blocking host-name lookup
-- Full-display or isolated single-window capture from the GUI
 
 Direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
 
