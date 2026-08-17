@@ -393,6 +393,7 @@ groovyMisterDiagnostics GroovyMister::getDiagnostics() const noexcept
 	diagnostics.transportErrors = m_transportErrors;
 	diagnostics.connected = m_isConnected;
 	diagnostics.haveFpgaStatus = m_haveFpgaStatus ? 1 : 0;
+	diagnostics.interlacePhaseValid = m_interlacePhase.IsValid() ? 1 : 0;
 	return diagnostics;
 }
 

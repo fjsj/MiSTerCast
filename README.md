@@ -17,7 +17,9 @@ Frame-delay requests are sent to the MiSTer core and raster pacing is calculated
 
 MiSTer status packets are decoded explicitly as little-endian protocol data. Status ordering follows the wrapping 32-bit frame counter, so a long-running stream continues to accept acknowledgements when the counter rolls over.
 
-Each run writes a timestamped diagnostic log under `%LOCALAPPDATA%\MiSTerCast\Logs`. While streaming, one `[stream]` sample per second records capture and output cadence, maximum transform and send/wait time, commanded frame/field, MiSTer frame/F1 status, field repeats, frame-counter realignments, and protocol readiness flags. The GUI shows only the latest telemetry sample so long sessions do not continually grow the log panel. These diagnostics do not add extra network waits or change field selection.
+Each run writes a timestamped diagnostic log under `%LOCALAPPDATA%\MiSTerCast\Logs`; the CLI can override that location with `--log-directory`. While streaming, one `[stream]` sample per second records capture and output cadence, maximum transform and send/wait time, commanded frame/field, MiSTer frame/F1 status, field repeats, frame-counter realignments, and protocol readiness flags. The GUI shows only the latest telemetry sample so long sessions do not continually grow the log panel. These diagnostics do not add extra network waits or change field selection.
+
+For repeatable phase-recovery tests, the CLI accepts `--cycles`, `--switch-modeline`, `--skip-every`, `--stall-every`, and `--stall-ms`. These fault options are disabled by default and only affect streams started after the diagnostic configuration is applied. A skipped blit advances the sender's logical frame but preserves one field period; a stall pauses before a blit. The `[stream]` diagnostics report the phase as `local` or `locked` and include cumulative injected skip/stall counts.
 
 The Windows Registered I/O sender drains completions without waiting in the render path. If a slow link still owns a registered video or audio buffer, MiSTerCast drops that complete batch instead of reusing the memory or growing an unbounded queue. The `[stream]` line reports `rio_outstanding`, `dropped_video`, `dropped_audio`, and `transport_errors`; sustained drops mean the selected network path cannot keep up. Direct Ethernet remains the recommended remedy.
 
@@ -64,6 +66,12 @@ FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "640x48
 ```
 
 Add `--switch-modeline "720x480i NTSC (60Hz)"` to change to another preset halfway through the run and exercise live mode switching, or `--cycles 3` to repeat stop/start three times in one process. `--test-pattern` temporarily covers the selected Windows display with a moving frame counter, then closes it when the run ends. Use `--no-audio` to isolate video throughput, or `--help` for all options. The command prints timestamped diagnostics and writes the same output under `%LOCALAPPDATA%\MiSTerCast\Logs`.
+
+The direct-Ethernet phase-recovery stress run used during development can be repeated with:
+
+```powershell
+FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "720x480i NTSC (60Hz)" --switch-modeline "640x480i NTSC (60Hz)" --duration 8 --cycles 3 --capture-width 720 --capture-height 480 --no-audio --skip-every 17 --stall-every 29 --stall-ms 40
+```
 
 ## Known issues
 - Frames may be dropped or doubled due to sync with video signal.

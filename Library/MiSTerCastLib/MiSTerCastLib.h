@@ -70,6 +70,11 @@ MISTERCASTLIB_API bool StartStream(const char* targetIp);
 
 MISTERCASTLIB_API bool StopStream();
 
+MISTERCASTLIB_API bool SetDiagnosticFaults(
+    UINT32 skipEvery,
+    UINT32 stallEvery,
+    UINT32 stallMilliseconds);
+
 MISTERCASTLIB_API bool SetModeline(
     double pclock,
     UINT16 hactive,

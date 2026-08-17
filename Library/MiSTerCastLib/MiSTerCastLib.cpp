@@ -20,6 +20,9 @@ std::unique_ptr<std::thread> captureScreenTask;
 std::unique_ptr<std::thread> castScreenTask;
 std::mutex captureTaskMutex;
 std::mutex castTaskMutex;
+std::atomic_uint32_t diagnosticSkipEvery = 0;
+std::atomic_uint32_t diagnosticStallEvery = 0;
+std::atomic_uint32_t diagnosticStallMilliseconds = 0;
 
 #include "groovymister.h"
 #include "renderer_nogpu.h"
@@ -109,7 +112,11 @@ void cast_screen()
 
         LogMessage("Casting to MiSTer starting.");
         {
-            auto renderer = std::make_unique<renderer_nogpu>(targetIpString, audioStarted);
+            mistercast::StreamFaultOptions diagnosticFaults = {};
+            diagnosticFaults.skipEvery = diagnosticSkipEvery.load(std::memory_order_acquire);
+            diagnosticFaults.stallEvery = diagnosticStallEvery.load(std::memory_order_acquire);
+            diagnosticFaults.stallMilliseconds = diagnosticStallMilliseconds.load(std::memory_order_acquire);
+            auto renderer = std::make_unique<renderer_nogpu>(targetIpString, audioStarted, diagnosticFaults);
             {
                 do
                 {
@@ -267,6 +274,28 @@ MISTERCASTLIB_API bool StopStream()
 
     casting_screen.store(false, std::memory_order_release);
     stopStream.store(false, std::memory_order_release);
+    return true;
+}
+
+MISTERCASTLIB_API bool SetDiagnosticFaults(
+    UINT32 skipEvery,
+    UINT32 stallEvery,
+    UINT32 stallMilliseconds)
+{
+    if (casting_screen.load(std::memory_order_acquire))
+    {
+        LogMessage("Diagnostic faults must be configured before starting a stream.", true);
+        return false;
+    }
+    if ((stallEvery == 0) != (stallMilliseconds == 0) || stallMilliseconds > 60000)
+    {
+        LogMessage("Diagnostic stall frequency and duration must both be zero or both be non-zero (maximum 60000 ms).", true);
+        return false;
+    }
+
+    diagnosticSkipEvery.store(skipEvery, std::memory_order_release);
+    diagnosticStallEvery.store(stallEvery, std::memory_order_release);
+    diagnosticStallMilliseconds.store(stallMilliseconds, std::memory_order_release);
     return true;
 }
 

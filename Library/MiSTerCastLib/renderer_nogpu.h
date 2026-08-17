@@ -10,6 +10,7 @@
 #pragma once
 
 #include "AudioProcessing.h"
+#include "DiagnosticFaults.h"
 #include "StreamingTiming.h"
 
 #include <iomanip>
@@ -67,9 +68,13 @@ nogpu_modeline selected_modeline_snapshot()
 class renderer_nogpu
 {
 public:
-    renderer_nogpu(std::string targetip, bool audioEnabled)
+    renderer_nogpu(
+        std::string targetip,
+        bool audioEnabled,
+        mistercast::StreamFaultOptions diagnosticFaults = {})
         : m_targetip(targetip),
-          m_audio_enabled(audioEnabled)
+          m_audio_enabled(audioEnabled),
+          m_fault_schedule(diagnosticFaults)
     {
     }
 
@@ -122,6 +127,10 @@ private:
     bool m_transport_failure_logged = false;
     bool m_capture_failure_logged = false;
     bool m_audio_enabled = false;
+    bool m_phase_lock_reported = false;
+    mistercast::StreamFaultSchedule m_fault_schedule;
+    uint32_t m_diagnostics_injected_skips = 0;
+    uint32_t m_diagnostics_injected_stalls = 0;
 
     uint64_t time_start = 0;
     uint64_t time_entry = 0;
@@ -288,6 +297,23 @@ void renderer_nogpu::draw()
         return;
     }
 
+    const mistercast::StreamFaultAction fault = m_fault_schedule.Next();
+    if (fault.stallMilliseconds != 0)
+    {
+        ++m_diagnostics_injected_stalls;
+        LogMessage("[fault] Stalling before blit attempt " + std::to_string(fault.attempt) +
+            " for " + std::to_string(fault.stallMilliseconds) + " ms.");
+        std::this_thread::sleep_for(std::chrono::milliseconds(fault.stallMilliseconds));
+    }
+    if (fault.skip)
+    {
+        ++m_diagnostics_injected_skips;
+        LogMessage("[fault] Skipping blit attempt " + std::to_string(fault.attempt) +
+            " at logical frame " + std::to_string(m_frame) + ".");
+        std::this_thread::sleep_for(std::chrono::duration<double, std::milli>(m_period));
+        return;
+    }
+
     int vsync_offset = 0;
 
     if (source.framedelay == 0)
@@ -320,6 +346,12 @@ void renderer_nogpu::draw()
     const uint64_t diagnostics_send_start = CurrentTicks();
     groovyMister.CmdBlit(m_frame, m_field, static_cast<uint16_t>(m_vsync_scanline), 15000, 0);
     groovyMister.WaitSync();
+    const groovyMisterDiagnostics completedBlit = groovyMister.getDiagnostics();
+    if (m_current_mode.interlace && !m_phase_lock_reported && completedBlit.interlacePhaseValid)
+    {
+        LogMessage("[phase] Locked to FPGA feedback at logical frame " + std::to_string(m_frame) + ".");
+        m_phase_lock_reported = true;
+    }
     const uint64_t diagnostics_send_end = CurrentTicks();
 
     time_blit = diagnostics_send_end;
@@ -427,6 +459,9 @@ bool renderer_nogpu::nogpu_switch_video_mode()
         mode.vtotal,
         mode.interlace
     );
+    m_phase_lock_reported = !mode.interlace;
+    if (mode.interlace)
+        LogMessage("[phase] Using local field sequence until a post-switch blit is acknowledged.");
 
     return true;
 }
@@ -555,14 +590,17 @@ void renderer_nogpu::nogpu_log_diagnostics(
         << " max_gap_ms=" << (m_diagnostics_max_gap * ticks_to_ms)
         << " max_transform_ms=" << (m_diagnostics_max_transform * ticks_to_ms)
         << " max_send_wait_ms=" << (m_diagnostics_max_send_wait * ticks_to_ms)
-        << " cmd=" << transport.commandFrame << ':' << m_field
+        << " cmd=" << transport.commandFrame << ':' << static_cast<unsigned int>(m_field)
         << " fpga=" << groovyMister.fpga.frame << ':' << static_cast<unsigned int>(groovyMister.fpga.vgaF1)
         << " echo=" << groovyMister.fpga.frameEcho
+        << " phase=" << (transport.interlacePhaseValid ? "locked" : "local")
         << " vcount=" << groovyMister.fpga.vCount << '/' << groovyMister.fpga.vCountEcho
         << " status_updates=" << m_diagnostics_status_updates
         << " f1_changes=" << m_diagnostics_f1_changes
         << " field_repeats=" << m_diagnostics_field_repeats
         << " frame_realign=" << m_diagnostics_frame_realignments
+        << " injected_skip=" << m_diagnostics_injected_skips
+        << " injected_stall=" << m_diagnostics_injected_stalls
         << " flags="
         << static_cast<unsigned int>(groovyMister.fpga.vramEndFrame)
         << static_cast<unsigned int>(groovyMister.fpga.vramReady)

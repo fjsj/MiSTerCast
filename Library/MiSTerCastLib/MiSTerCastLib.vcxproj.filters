@@ -21,6 +21,9 @@
     <ClInclude Include="AudioProcessing.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="DiagnosticFaults.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="FrameTransform.h">
       <Filter>Header Files</Filter>
     </ClInclude>

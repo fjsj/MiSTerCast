@@ -33,6 +33,10 @@ namespace MiSTerCast
             public ushort? CaptureHeight;
             public bool ListModelines;
             public bool ShowHelp;
+            public int SkipEvery;
+            public int StallEvery;
+            public int StallMilliseconds;
+            public string LogDirectory;
         }
 
         private sealed class Modeline
@@ -235,10 +239,12 @@ namespace MiSTerCast
 
             ushort captureWidth = options.CaptureWidth ?? selected.HActive;
             ushort captureHeight = options.CaptureHeight ?? selected.VActive;
-            string logDirectory = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "MiSTerCast",
-                "Logs");
+            string logDirectory = String.IsNullOrWhiteSpace(options.LogDirectory)
+                ? Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "MiSTerCast",
+                    "Logs")
+                : Path.GetFullPath(options.LogDirectory);
             Directory.CreateDirectory(logDirectory);
             string logPath = Path.Combine(
                 logDirectory,
@@ -257,7 +263,7 @@ namespace MiSTerCast
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9}",
+                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9} skip_every={10} stall_every={11} stall_ms={12}",
                     address,
                     selected.Name,
                     switched == null ? "" : switched.Name,
@@ -267,7 +273,10 @@ namespace MiSTerCast
                     options.Audio,
                     captureWidth,
                     captureHeight,
-                    options.TestPattern), false);
+                    options.TestPattern,
+                    options.SkipEvery,
+                    options.StallEvery,
+                    options.StallMilliseconds), false);
 
                 if (options.TestPattern)
                 {
@@ -281,6 +290,15 @@ namespace MiSTerCast
                 {
                     QueueLog("Native initialization failed.", true);
                     return 3;
+                }
+
+                if (!MiSTerCastInterop.SetDiagnosticFaults(
+                    (uint)options.SkipEvery,
+                    (uint)options.StallEvery,
+                    (uint)options.StallMilliseconds))
+                {
+                    QueueLog("Native diagnostic-fault validation failed.", true);
+                    return 7;
                 }
 
                 if (!ApplyModeline(selected))
@@ -462,6 +480,9 @@ namespace MiSTerCast
                 case "--modelines":
                     options.ModelinesPath = NextValue(args, ref index, argument);
                     break;
+                case "--log-directory":
+                    options.LogDirectory = NextValue(args, ref index, argument);
+                    break;
                 case "--duration":
                     options.DurationSeconds = ParseInt(NextValue(args, ref index, argument), argument, 1, 86400);
                     break;
@@ -477,10 +498,21 @@ namespace MiSTerCast
                 case "--capture-height":
                     options.CaptureHeight = (ushort)ParseInt(NextValue(args, ref index, argument), argument, 1, ushort.MaxValue);
                     break;
+                case "--skip-every":
+                    options.SkipEvery = ParseInt(NextValue(args, ref index, argument), argument, 0, 1000000);
+                    break;
+                case "--stall-every":
+                    options.StallEvery = ParseInt(NextValue(args, ref index, argument), argument, 0, 1000000);
+                    break;
+                case "--stall-ms":
+                    options.StallMilliseconds = ParseInt(NextValue(args, ref index, argument), argument, 0, 60000);
+                    break;
                 default:
                     throw new ArgumentException("Unknown argument: " + argument);
                 }
             }
+            if ((options.StallEvery == 0) != (options.StallMilliseconds == 0))
+                throw new ArgumentException("--stall-every and --stall-ms must both be specified with non-zero values.");
             return options;
         }
 
@@ -579,8 +611,12 @@ namespace MiSTerCast
             Console.WriteLine("  --capture-height <px>   Capture height (default: modeline active height)");
             Console.WriteLine("  --no-audio              Disable loopback audio");
             Console.WriteLine("  --test-pattern          Show a full-screen moving frame counter on the captured display");
+            Console.WriteLine("  --skip-every <fields>   Omit each Nth blit for phase-recovery diagnostics");
+            Console.WriteLine("  --stall-every <fields>  Stall before each Nth blit (requires --stall-ms)");
+            Console.WriteLine("  --stall-ms <ms>         Diagnostic stall duration (requires --stall-every)");
             Console.WriteLine("  --list-modelines        List preset names and exit");
             Console.WriteLine("  --modelines <path>      Use another modelines.dat file");
+            Console.WriteLine("  --log-directory <path> Write the diagnostic log to another directory");
         }
     }
 }

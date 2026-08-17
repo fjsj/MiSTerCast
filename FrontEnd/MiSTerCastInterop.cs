@@ -40,6 +40,12 @@ namespace MiSTerCast
         [DllImport("MISTERCASTLIB.dll", EntryPoint = "StopStream", CallingConvention = CallingConvention.Cdecl)]
         public static extern bool StopStream();
 
+        [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetDiagnosticFaults", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool SetDiagnosticFaults(
+            UInt32 skipEvery,
+            UInt32 stallEvery,
+            UInt32 stallMilliseconds);
+
         [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetModeline", CallingConvention = CallingConvention.Cdecl)]
         public static extern bool SetModeline(
             Double pclock,

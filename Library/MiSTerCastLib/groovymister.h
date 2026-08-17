@@ -77,6 +77,7 @@ typedef struct groovyMisterDiagnostics {
 	uint32_t transportErrors;
 	uint8_t connected;
 	uint8_t haveFpgaStatus;
+	uint8_t interlacePhaseValid;
 } groovyMisterDiagnostics;
 
 typedef struct fpgaJoyInputs{
