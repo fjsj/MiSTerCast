@@ -1,36 +1,34 @@
-# MiSTerCast
+# MiSTerCast (fjsj fork, AI made)
 
-MiSTerCast streams your Windows PC screen and loopback audio to the Groovy_MiSTer core. It is a general-purpose desktop caster, not a replacement for GroovyMAME or another emulator with integrated Groovy_MiSTer support.
+Fork from https://github.com/iequalshane/MiSTerCast
 
-A direct Ethernet connection is strongly recommended. If the MiSTer is also reachable over Wi-Fi, enter the Ethernet adapter's raw IPv4 address so a host name cannot select the slower route.
+MiSTerCast streams your Windows PC screen and audio to the Groovy_MiSTer core. It is a general-purpose desktop caster, not a replacement for GroovyMAME or another emulator with integrated Groovy_MiSTer support.
 
 Useful Groovy_MiSTer setup references:
 
 - https://github.com/lutechsource/MiSTerStuff/blob/main/GroovyMiSTer/mame_documentation.md
+- https://misterfpga.org/viewtopic.php?t=7781 (register to view images)
 - https://github.com/psakhis/Groovy_MiSTer
 
 ## Requirements
 
 - A MiSTer running the Groovy_MiSTer core
+- A direct Ethernet connection is strongly recommended. If the MiSTer is also reachable over Wi-Fi, enter the Ethernet adapter's raw IPv4 address so a host name cannot select the slower route.
 - Microsoft Visual C++ x86 Redistributable: https://aka.ms/vs/17/release/vc_redist.x86.exe
 - Audio enabled in the core if you want sound
-- A Windows display running near the output refresh rate, normally about 60 Hz
+- A Windows display running near the output refresh rate, normally about 60 Hz (try also 59,94 Hz if supported)
 
-## Features
+## New Features
 
-- GUI and command-line streaming tools
-- Low-latency Windows Desktop Duplication capture and WASAPI loopback audio
-- Point, Bilinear, and Line Blend scaling
-- Stable interlaced field alignment after start and mode changes
+- Point, Bilinear, and Line Blend sampling
 - Optional full-height framebuffer mode for interlaced output
-- Timestamped performance and transport diagnostics
 - Safe stop/restart behavior and non-blocking host-name lookup
 
 Direct-Ethernet frame-counter tests have measured the same frame as HDMI or one frame behind.
 
 ## Sampling
 
-Choose a filter from the GUI's **Sampling** menu or with CLI `--sampling`:
+Choose a filter from the GUI's **Sampling** menu:
 
 | Mode | Best for |
 | --- | --- |
@@ -53,7 +51,7 @@ FrontEnd\bin\Release\MiSTerCastCli.exe --list-modelines
 Run a 15-second direct-Ethernet 480i test with a moving frame counter:
 
 ```powershell
-FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.200.2 --modeline "720x480i NTSC (60Hz)" --duration 15 --test-pattern --no-audio
+FrontEnd\bin\Release\MiSTerCastCli.exe --target 192.168.X.X --modeline "720x480i NTSC (60Hz)" --duration 15 --test-pattern --no-audio
 ```
 
 Add `--sampling line-blend` to test line filtering, `--cycles 3` to repeat stop/start, or `--switch-modeline "640x480i NTSC (60Hz)"` to switch modes halfway through each cycle. Use `--help` for every option.
@@ -69,10 +67,14 @@ Logs are written under `%LOCALAPPDATA%\MiSTerCast\Logs`. The CLI can use another
 
 ## Known limitations
 
-- Wi-Fi can fall behind badly enough to make the MiSTer core unresponsive. Use direct Ethernet for gaming and recovery.
+- Wi-Fi can fall behind badly enough to make the MiSTer core unresponsive. Use direct Ethernet.
 - The full-height interlaced framebuffer roughly doubles video bandwidth and is disabled by default.
 - Nothing above 720x480i is currently recommended because of MiSTer-side throughput.
 - A high-refresh Windows desktop is not supported well; match the desktop refresh to the output when possible.
 - The bundled modelines are starting points. You can add modes to `modelines.dat`.
 
 Build instructions, implementation notes, and the complete test procedure are in [AGENTS.md](AGENTS.md).
+
+## Linux fork
+
+For a Linux fork, check [MiSTerCast-Linux](https://github.com/fjsj/MiSTerCast-Linux)
