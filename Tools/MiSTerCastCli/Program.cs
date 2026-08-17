@@ -38,6 +38,7 @@ namespace MiSTerCast
             public int StallMilliseconds;
             public string LogDirectory;
             public bool ProgressiveFramebuffer;
+            public byte Sampling;
         }
 
         private sealed class Modeline
@@ -269,7 +270,7 @@ namespace MiSTerCast
                 QueueLog("CLI log: " + logPath, false);
                 QueueLog(String.Format(
                     CultureInfo.InvariantCulture,
-                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9} skip_every={10} stall_every={11} stall_ms={12} progressive_framebuffer={13}",
+                    "E2E target={0} modeline=\"{1}\" switch_modeline=\"{2}\" duration={3}s cycles={4} display={5} audio={6} capture={7}x{8} test_pattern={9} skip_every={10} stall_every={11} stall_ms={12} progressive_framebuffer={13} sampling={14}",
                     address,
                     selected.Name,
                     switched == null ? "" : switched.Name,
@@ -283,7 +284,8 @@ namespace MiSTerCast
                     options.SkipEvery,
                     options.StallEvery,
                     options.StallMilliseconds,
-                    options.ProgressiveFramebuffer), false);
+                    options.ProgressiveFramebuffer,
+                    SamplingName(options.Sampling)), false);
 
                 if (options.TestPattern)
                 {
@@ -313,7 +315,7 @@ namespace MiSTerCast
                     QueueLog("Native modeline validation failed.", true);
                     return 6;
                 }
-                MiSTerCastInterop.SetSource(
+                MiSTerCastInterop.SetSourceEx(
                     (byte)(options.Display - 1),
                     options.Audio,
                     false,
@@ -323,7 +325,8 @@ namespace MiSTerCast
                     captureHeight,
                     0,
                     0,
-                    0);
+                    0,
+                    options.Sampling);
 
                 for (int cycle = 1; cycle <= options.Cycles && !Cancellation.IsCancellationRequested; ++cycle)
                 {
@@ -479,6 +482,9 @@ namespace MiSTerCast
                 case "--progressive-framebuffer":
                     options.ProgressiveFramebuffer = true;
                     break;
+                case "--sampling":
+                    options.Sampling = ParseSampling(NextValue(args, ref index, argument));
+                    break;
                 case "--target":
                     options.Target = NextValue(args, ref index, argument);
                     break;
@@ -548,6 +554,34 @@ namespace MiSTerCast
                     maximum));
             }
             return parsed;
+        }
+
+        private static byte ParseSampling(string value)
+        {
+            switch (value.ToLowerInvariant())
+            {
+            case "point":
+                return 0;
+            case "bilinear":
+                return 1;
+            case "line-blend":
+                return 2;
+            default:
+                throw new ArgumentException("--sampling must be point, bilinear, or line-blend.");
+            }
+        }
+
+        private static string SamplingName(byte sampling)
+        {
+            switch (sampling)
+            {
+            case 1:
+                return "bilinear";
+            case 2:
+                return "line-blend";
+            default:
+                return "point";
+            }
         }
 
         private static List<Modeline> ReadModelines(string path)
@@ -623,6 +657,7 @@ namespace MiSTerCast
             Console.WriteLine("  --no-audio              Disable loopback audio");
             Console.WriteLine("  --test-pattern          Show a full-screen moving frame counter on the captured display");
             Console.WriteLine("  --progressive-framebuffer Send full-height RGB for interlaced modes (higher bandwidth)");
+            Console.WriteLine("  --sampling <mode>       point (default), bilinear, or line-blend");
             Console.WriteLine("  --skip-every <fields>   Omit each Nth blit for phase-recovery diagnostics");
             Console.WriteLine("  --stall-every <fields>  Stall before each Nth blit (requires --stall-ms)");
             Console.WriteLine("  --stall-ms <ms>         Diagnostic stall duration (requires --stall-every)");

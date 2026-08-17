@@ -45,6 +45,7 @@ namespace MiSTerCast
         public Int16 xoffset;
         public Int16 yoffset;
         public byte rotation;
+        public byte sampling;
     }
 
     public partial class MainWindow : Window
@@ -238,7 +239,7 @@ namespace MiSTerCast
 
         #region Settings
 
-        const int SettingsVersion = 2;
+        const int SettingsVersion = 3;
 
         private void SaveSettingsButton_Click(object sender, RoutedEventArgs e)
         {
@@ -286,6 +287,7 @@ namespace MiSTerCast
                                 sw.WriteLine(CaptureHeight.Text);
                                 sw.WriteLine(CaptureXOffset.Text);
                                 sw.WriteLine(CaptureYOffset.Text);
+                                sw.WriteLine(SamplingComboBox.SelectedIndex);
 
                                 Log("Settings saved.");
                             }
@@ -367,6 +369,9 @@ namespace MiSTerCast
             CaptureHeight.Text = sr.ReadLine();
             CaptureXOffset.Text = sr.ReadLine();
             CaptureYOffset.Text = sr.ReadLine();
+            SamplingComboBox.SelectedIndex = settingsVersion >= 3
+                ? Math.Max(0, Math.Min(int.Parse(sr.ReadLine()), SamplingComboBox.Items.Count - 1))
+                : 0;
 
             Log("Settings loaded.");
         }
@@ -518,6 +523,7 @@ namespace MiSTerCast
             currentSourceOptions.display = (byte)CaptureSourceBox.SelectedIndex;
             currentSourceOptions.alignment = (byte)AlignmentBox.SelectedIndex;
             currentSourceOptions.rotation = (byte)RotateComboBox.SelectedIndex;
+            currentSourceOptions.sampling = (byte)SamplingComboBox.SelectedIndex;
             currentSourceOptions.cropmode = (byte)CropComboBox.SelectedIndex;
             CaptureWidth.IsEnabled = CropComboBox.SelectedIndex == 0;
             CaptureHeight.IsEnabled = CropComboBox.SelectedIndex == 0;
@@ -533,7 +539,7 @@ namespace MiSTerCast
 
             if (currentSourceOptions.width > 0 && currentSourceOptions.height > 0)
             {
-                MiSTerCastInterop.SetSource(
+                MiSTerCastInterop.SetSourceEx(
                     currentSourceOptions.display,
                     currentSourceOptions.audio,
                     currentSourceOptions.preview,
@@ -543,7 +549,8 @@ namespace MiSTerCast
                     currentSourceOptions.height,
                     currentSourceOptions.xoffset,
                     currentSourceOptions.yoffset,
-                    currentSourceOptions.rotation);
+                    currentSourceOptions.rotation,
+                    currentSourceOptions.sampling);
             }
         }
 

@@ -56,6 +56,7 @@ struct SourceOptions {
     INT16 xoffset;
     INT16 yoffset;
     Rotation rotation;
+    SamplingMode sampling;
 };
 
 typedef void(__stdcall *log_function)(const char* message, bool error);
@@ -111,3 +112,16 @@ MISTERCASTLIB_API bool SetSource(
     INT16 xoffset,
     INT16 yoffset,
     UINT8 rotation);
+
+MISTERCASTLIB_API bool SetSourceEx(
+    UINT8 display,
+    bool audio,
+    bool preview,
+    UINT8 alignment,
+    UINT8 cropmode,
+    UINT16 width,
+    UINT16 height,
+    INT16 xoffset,
+    INT16 yoffset,
+    UINT8 rotation,
+    UINT8 sampling);

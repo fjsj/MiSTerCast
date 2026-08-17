@@ -275,6 +275,7 @@ void renderer_nogpu::draw()
         m_current_mode.progressiveFramebuffer,
         static_cast<uint8_t>(m_field),
         videoCaptures[drawIndex].rotation,
+        source.sampling,
         reinterpret_cast<uint8_t*>(fb),
         outputSize))
     {
@@ -603,6 +604,7 @@ void renderer_nogpu::nogpu_log_diagnostics(
         << "[stream] mode=" << m_current_mode.hactive << 'x' << m_current_mode.vactive
         << (m_current_mode.interlace ? 'i' : 'p')
         << " framebuffer=" << (m_current_mode.progressiveFramebuffer ? "progressive" : "field")
+        << " sampling=" << SamplingModeName(source_config.snapshot().sampling)
         << " rate=" << (m_diagnostics_frames / elapsed_seconds)
         << " capture=" << (m_diagnostics_captures / elapsed_seconds)
         << " capture_repeat=" << m_diagnostics_capture_repeats

@@ -216,6 +216,7 @@
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <ComboBox x:Name="CropComboBox" Grid.Row="0" Margin="10 10 10 0" Width="Auto" SelectedIndex="0" SelectionChanged="CaptureSource_SelectionChanged">
                             <ComboBoxItem>Custom Size</ComboBoxItem>
@@ -227,7 +228,18 @@
                             <ComboBoxItem>Full 4:3 Crop</ComboBoxItem>
                             <ComboBoxItem>Full 5:4 Crop</ComboBoxItem>
                         </ComboBox>
-                        <Grid Grid.Row="1" >
+                        <ComboBox x:Name="SamplingComboBox"
+                                  Grid.Row="1"
+                                  Margin="10 10 10 0"
+                                  Width="Auto"
+                                  SelectedIndex="0"
+                                  SelectionChanged="CaptureSource_SelectionChanged"
+                                  ToolTip="Point is pixel-exact. Bilinear smooths neighboring pixels. Line Blend applies an area-weighted vertical filter to reduce CRT line shimmer.">
+                            <ComboBoxItem>Point</ComboBoxItem>
+                            <ComboBoxItem>Bilinear</ComboBoxItem>
+                            <ComboBoxItem>Line Blend</ComboBoxItem>
+                        </ComboBox>
+                        <Grid Grid.Row="2" >
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="auto"/>
                                 <RowDefinition Height="auto"/>

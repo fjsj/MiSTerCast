@@ -85,5 +85,19 @@ namespace MiSTerCast
             Int16 xoffset,
             Int16 yoffset,
             byte rotation);
+
+        [DllImport("MISTERCASTLIB.dll", EntryPoint = "SetSourceEx", CallingConvention = CallingConvention.Cdecl)]
+        public static extern bool SetSourceEx(
+            byte display,
+            bool audio,
+            bool preview,
+            byte alignment,
+            byte cropmode,
+            UInt16 width,
+            UInt16 height,
+            Int16 xoffset,
+            Int16 yoffset,
+            byte rotation,
+            byte sampling);
     }
 }

@@ -161,6 +161,7 @@ MISTERCASTLIB_API bool Initialize(log_function fnLog, capture_image_function fnC
     initialSource.framedelay = 0;
     initialSource.alignment = Alignment::Center;
     initialSource.cropmode = CropMode::Full43;
+    initialSource.sampling = SamplingMode::Point;
     source_config.publish(initialSource);
 
     {
@@ -373,6 +374,30 @@ MISTERCASTLIB_API bool SetSource(
     INT16 yoffset,
     UINT8 rotation)
 {
+    return SetSourceEx(
+        display, audio, preview, alignment, cropmode, xcrop, ycrop,
+        xoffset, yoffset, rotation, static_cast<UINT8>(SamplingMode::Point));
+}
+
+MISTERCASTLIB_API bool SetSourceEx(
+    UINT8 display,
+    bool audio,
+    bool preview,
+    UINT8 alignment,
+    UINT8 cropmode,
+    UINT16 xcrop,
+    UINT16 ycrop,
+    INT16 xoffset,
+    INT16 yoffset,
+    UINT8 rotation,
+    UINT8 sampling)
+{
+    if (sampling > static_cast<UINT8>(SamplingMode::LineBlend))
+    {
+        LogMessage("Unsupported sampling mode. Choose Point, Bilinear, or Line Blend.", true);
+        return false;
+    }
+
     const nogpu_modeline modeline = selected_modeline_snapshot();
     const SourceOptions previousSource = source_config.snapshot();
     SourceOptions source = previousSource;
@@ -386,6 +411,7 @@ MISTERCASTLIB_API bool SetSource(
     source.xoffset = xoffset;
     source.yoffset = yoffset;
     source.rotation = static_cast<Rotation>(rotation);
+    source.sampling = static_cast<SamplingMode>(sampling);
 
     switch (cropmode)
     {
